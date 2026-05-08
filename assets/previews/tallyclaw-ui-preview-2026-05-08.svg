@@ -1,0 +1,140 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="900" viewBox="0 0 1400 900">
+  <defs>
+    <linearGradient id="desk" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101521"/>
+      <stop offset="0.55" stop-color="#1c2332"/>
+      <stop offset="1" stop-color="#0d121b"/>
+    </linearGradient>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f9fbff"/>
+      <stop offset="1" stop-color="#eef4ff"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.96"/>
+      <stop offset="1" stop-color="#eaf1ff" stop-opacity="0.9"/>
+    </linearGradient>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="24" stdDeviation="24" flood-color="#000000" flood-opacity="0.28"/>
+    </filter>
+    <filter id="petShadow" x="-50%" y="-50%" width="200%" height="220%">
+      <feDropShadow dx="0" dy="18" stdDeviation="14" flood-color="#315be8" flood-opacity="0.35"/>
+    </filter>
+    <style>
+      .title { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif; font-size: 34px; font-weight: 750; fill: #121827; }
+      .label { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; font-size: 22px; font-weight: 700; fill: #6a7890; }
+      .value { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "PingFang SC", sans-serif; font-size: 48px; font-weight: 800; fill: #111827; }
+      .small { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; font-size: 19px; font-weight: 650; fill: #7a879a; }
+      .tiny { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; font-size: 16px; font-weight: 650; fill: #78869b; }
+      .mono { font-family: "SF Mono", ui-monospace, Menlo, monospace; font-size: 18px; font-weight: 700; fill: #50627d; }
+      .pixel { shape-rendering: crispEdges; }
+    </style>
+  </defs>
+
+  <rect width="1400" height="900" fill="url(#desk)"/>
+
+  <g opacity="0.28">
+    <rect x="84" y="88" width="260" height="162" rx="18" fill="#273145"/>
+    <rect x="384" y="118" width="220" height="104" rx="16" fill="#263044"/>
+    <rect x="1046" y="102" width="270" height="156" rx="18" fill="#253045"/>
+    <rect x="145" y="682" width="390" height="86" rx="18" fill="#253044"/>
+    <rect x="904" y="684" width="348" height="92" rx="18" fill="#26334a"/>
+  </g>
+
+  <g filter="url(#softShadow)">
+    <rect x="224" y="166" width="952" height="388" rx="58" fill="url(#panel)"/>
+    <rect x="248" y="190" width="904" height="340" rx="42" fill="#ffffff" opacity="0.62"/>
+  </g>
+
+  <g transform="translate(292 232)">
+    <rect x="0" y="0" width="292" height="252" rx="40" fill="#f4f8ff" stroke="#d9e5fb" stroke-width="2"/>
+    <text x="34" y="55" class="label">当前宠物状态</text>
+    <text x="34" y="94" class="title">TallyClaw</text>
+    <text x="34" y="130" class="small">准实时观测中</text>
+    <g transform="translate(34 160)">
+      <rect x="0" y="0" width="92" height="34" rx="17" fill="#eaf8f2"/>
+      <circle cx="20" cy="17" r="6" fill="#28c583"/>
+      <text x="36" y="23" class="tiny" fill="#277b5b">只读</text>
+      <rect x="108" y="0" width="118" height="34" rx="17" fill="#eef2ff"/>
+      <text x="126" y="23" class="tiny" fill="#4964d8">低占用</text>
+    </g>
+  </g>
+
+  <g transform="translate(530 210)" filter="url(#petShadow)" class="pixel">
+    <rect x="96" y="0" width="16" height="16" fill="#26386e"/>
+    <rect x="112" y="0" width="48" height="16" fill="#5277f5"/>
+    <rect x="160" y="0" width="16" height="16" fill="#26386e"/>
+    <rect x="64" y="16" width="32" height="16" fill="#26386e"/>
+    <rect x="96" y="16" width="96" height="16" fill="#6590ff"/>
+    <rect x="192" y="16" width="32" height="16" fill="#26386e"/>
+    <rect x="48" y="32" width="32" height="16" fill="#26386e"/>
+    <rect x="80" y="32" width="160" height="16" fill="#6ea0ff"/>
+    <rect x="240" y="32" width="32" height="16" fill="#26386e"/>
+    <rect x="32" y="48" width="32" height="16" fill="#26386e"/>
+    <rect x="64" y="48" width="208" height="16" fill="#5984f4"/>
+    <rect x="272" y="48" width="32" height="16" fill="#26386e"/>
+    <rect x="16" y="64" width="32" height="48" fill="#26386e"/>
+    <rect x="48" y="64" width="256" height="48" fill="#4d78ee"/>
+    <rect x="304" y="64" width="32" height="48" fill="#26386e"/>
+    <rect x="32" y="112" width="32" height="16" fill="#26386e"/>
+    <rect x="64" y="112" width="240" height="16" fill="#416de2"/>
+    <rect x="304" y="112" width="16" height="16" fill="#26386e"/>
+    <rect x="64" y="128" width="208" height="16" fill="#26386e"/>
+    <rect x="96" y="144" width="160" height="16" fill="#314f9f"/>
+
+    <rect x="88" y="58" width="160" height="92" rx="0" fill="#1a274a"/>
+    <rect x="104" y="74" width="128" height="60" fill="#22345f"/>
+    <rect x="118" y="92" width="16" height="16" fill="#73f0ff"/>
+    <rect x="134" y="108" width="16" height="16" fill="#73f0ff"/>
+    <rect x="150" y="92" width="16" height="16" fill="#73f0ff"/>
+    <rect x="190" y="104" width="34" height="8" fill="#a8f5ff"/>
+
+    <rect x="100" y="160" width="136" height="96" fill="#446fec"/>
+    <rect x="84" y="176" width="16" height="64" fill="#26386e"/>
+    <rect x="236" y="176" width="16" height="64" fill="#26386e"/>
+    <rect x="116" y="180" width="104" height="44" fill="#5d86ff"/>
+    <rect x="130" y="194" width="20" height="8" fill="#dce8ff"/>
+    <rect x="130" y="202" width="8" height="8" fill="#dce8ff"/>
+    <rect x="148" y="210" width="36" height="8" fill="#dce8ff"/>
+    <rect x="116" y="256" width="34" height="34" fill="#26386e"/>
+    <rect x="186" y="256" width="34" height="34" fill="#26386e"/>
+    <rect x="122" y="256" width="28" height="22" fill="#365ed3"/>
+    <rect x="186" y="256" width="28" height="22" fill="#365ed3"/>
+  </g>
+
+  <g transform="translate(712 232)">
+    <rect x="0" y="0" width="380" height="252" rx="40" fill="url(#glass)" stroke="#d8e5f7" stroke-width="2"/>
+    <text x="34" y="54" class="label">今日 TOKEN</text>
+    <text x="34" y="116" class="value">1.28M</text>
+    <text x="34" y="154" class="small">输入 1.02M / 输出 260K</text>
+    <g transform="translate(34 182)">
+      <rect x="0" y="0" width="312" height="18" rx="9" fill="#e2e8f6"/>
+      <rect x="0" y="0" width="218" height="18" rx="9" fill="#5b7cff"/>
+      <rect x="0" y="0" width="94" height="18" rx="9" fill="#46cfa1"/>
+    </g>
+    <text x="34" y="230" class="mono">cockpit 52% · gateway 41%</text>
+  </g>
+
+  <g transform="translate(294 600)" filter="url(#softShadow)">
+    <rect x="0" y="0" width="812" height="136" rx="38" fill="url(#glass)"/>
+    <g transform="translate(34 28)">
+      <text x="0" y="24" class="label">本周</text>
+      <text x="0" y="78" class="value" font-size="42">8.64M</text>
+      <text x="176" y="24" class="label">请求</text>
+      <text x="176" y="78" class="value" font-size="42">3.2K</text>
+      <text x="350" y="24" class="label">成功率</text>
+      <text x="350" y="78" class="value" font-size="42">98%</text>
+      <text x="548" y="24" class="label">平均延迟</text>
+      <text x="548" y="78" class="value" font-size="42">1.4s</text>
+    </g>
+  </g>
+
+  <g transform="translate(900 392)">
+    <rect x="0" y="0" width="152" height="44" rx="22" fill="#111827" opacity="0.9"/>
+    <circle cx="26" cy="22" r="8" fill="#54e3b0"/>
+    <text x="44" y="29" class="tiny" fill="#e8f1ff">准实时同步</text>
+  </g>
+
+  <g transform="translate(113 812)">
+    <text x="0" y="0" class="small" fill="#b8c4d8">预览概念：可拖动桌面宠物 + 悬浮观测胶囊；详细 dashboard 后置。</text>
+  </g>
+</svg>
