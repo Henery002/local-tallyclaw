@@ -26,6 +26,21 @@ struct TallyClawApp: App {
     }
 
     MenuBarExtra("TallyClaw", systemImage: "pawprint.fill") {
+      Button("显示主界面") {
+        NSApp.activate(ignoringOtherApps: true)
+        NSApp.windows.forEach { window in
+          window.orderFrontRegardless()
+        }
+      }
+
+      Button("隐藏主界面") {
+        NSApp.windows.forEach { window in
+          window.orderOut(nil)
+        }
+      }
+
+      Divider()
+
       Toggle("常驻顶层", isOn: $floatingPreferences.isAlwaysOnTop)
 
       Button(appPreferences.launchAtLogin ? "关闭开机启动" : "开启开机启动") {
@@ -42,17 +57,20 @@ struct TallyClawApp: App {
       SettingsLink {
         Text("设置...")
       }
-
-      Button("退出 TallyClaw") {
-        NSApp.terminate(nil)
-      }
     }
   }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
-    NSApp.setActivationPolicy(.regular)
+    NSApp.setActivationPolicy(.accessory)
     NSApp.activate(ignoringOtherApps: true)
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    sender.windows.forEach { window in
+      window.orderOut(nil)
+    }
+    return .terminateCancel
   }
 }
