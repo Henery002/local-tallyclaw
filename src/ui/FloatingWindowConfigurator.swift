@@ -2,6 +2,8 @@ import AppKit
 import SwiftUI
 
 struct FloatingWindowConfigurator: NSViewRepresentable {
+  @ObservedObject var windowState: FloatingWindowState
+  @ObservedObject var preferences: FloatingWindowPreferences
   private static var positionedWindows = Set<ObjectIdentifier>()
 
   func makeNSView(context: Context) -> NSView {
@@ -21,14 +23,15 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
   private func configure(_ window: NSWindow?) {
     guard let window else { return }
 
-    window.level = .floating
+    windowState.capture(window: window)
+    window.level = preferences.isAlwaysOnTop ? .floating : .normal
     window.isOpaque = false
     window.backgroundColor = .clear
     window.hasShadow = false
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
     window.titlebarSeparatorStyle = .none
-    window.isMovableByWindowBackground = true
+    window.isMovableByWindowBackground = false
     window.collectionBehavior.insert(.canJoinAllSpaces)
     window.collectionBehavior.insert(.fullScreenAuxiliary)
     window.styleMask.remove(.titled)
@@ -45,16 +48,25 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
     window.standardWindowButton(.zoomButton)?.isHidden = true
 
     let identifier = ObjectIdentifier(window)
-    if !Self.positionedWindows.contains(identifier) {
+    let isFirstConfiguration = !Self.positionedWindows.contains(identifier)
+    if isFirstConfiguration {
       position(window)
       Self.positionedWindows.insert(identifier)
     }
 
-    window.orderFrontRegardless()
+    if isFirstConfiguration || preferences.isAlwaysOnTop {
+      window.orderFrontRegardless()
+    }
+    windowState.refresh()
   }
 
   private func position(_ window: NSWindow) {
-    let size = NSSize(width: 296, height: 352)
+    let size = NSSize(width: 308, height: 420)
+    if let restoredFrame = preferences.restoredFrame(defaultSize: size) {
+      window.setFrame(restoredFrame, display: true)
+      return
+    }
+
     let screenFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
     let origin = NSPoint(
       x: screenFrame.minX + 72,

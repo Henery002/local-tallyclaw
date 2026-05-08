@@ -38,8 +38,8 @@ public struct LocalAIGatewayUsageDataSource: UsageDataSource {
 
     let observedAt = now()
     let todayStart = calendar.startOfDay(for: observedAt)
-    let weekStart = calendar.date(byAdding: .day, value: -6, to: todayStart) ?? todayStart
-    let monthStart = calendar.date(byAdding: .month, value: -1, to: observedAt) ?? todayStart
+    let weekStart = observedAt.addingTimeInterval(-7 * 24 * 60 * 60)
+    let monthStart = observedAt.addingTimeInterval(-30 * 24 * 60 * 60)
 
     let today = try database.aggregate(since: todayStart)
     let week = try database.aggregate(since: weekStart)
@@ -53,7 +53,7 @@ public struct LocalAIGatewayUsageDataSource: UsageDataSource {
       month: month,
       lifetime: lifetime,
       topSources: topSources,
-      syncHealth: .syncing,
+      syncHealth: .idle,
       observedAt: observedAt
     )
   }

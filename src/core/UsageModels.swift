@@ -14,7 +14,7 @@ public struct TokenBreakdown: Equatable, Sendable {
   }
 
   public var total: Int64 {
-    input + output + cache + thinking
+    input + output + thinking
   }
 }
 
@@ -83,6 +83,7 @@ public struct UsageSnapshot: Equatable, Sendable {
   public var topSources: [SourceShare]
   public var syncHealth: SyncHealth
   public var observedAt: Date
+  public var sourceStatuses: [SourceReadStatus]
 
   public init(
     today: UsagePeriodStats,
@@ -93,6 +94,28 @@ public struct UsageSnapshot: Equatable, Sendable {
     syncHealth: SyncHealth,
     observedAt: Date
   ) {
+    self.init(
+      today: today,
+      week: week,
+      month: month,
+      lifetime: lifetime,
+      topSources: topSources,
+      syncHealth: syncHealth,
+      observedAt: observedAt,
+      sourceStatuses: []
+    )
+  }
+
+  public init(
+    today: UsagePeriodStats,
+    week: UsagePeriodStats,
+    month: UsagePeriodStats,
+    lifetime: UsagePeriodStats,
+    topSources: [SourceShare],
+    syncHealth: SyncHealth,
+    observedAt: Date,
+    sourceStatuses: [SourceReadStatus]
+  ) {
     self.today = today
     self.week = week
     self.month = month
@@ -100,6 +123,7 @@ public struct UsageSnapshot: Equatable, Sendable {
     self.topSources = topSources
     self.syncHealth = syncHealth
     self.observedAt = observedAt
+    self.sourceStatuses = sourceStatuses
   }
 
   public static let preview = UsageSnapshot(
@@ -123,7 +147,7 @@ public struct UsageSnapshot: Equatable, Sendable {
       SourceShare(name: "cockpit", percent: 52),
       SourceShare(name: "gateway", percent: 41)
     ],
-    syncHealth: .syncing,
+    syncHealth: .idle,
     observedAt: Date(timeIntervalSince1970: 1_778_227_200)
   )
 }
@@ -151,4 +175,3 @@ public extension Int64 {
     return formatted + suffix
   }
 }
-

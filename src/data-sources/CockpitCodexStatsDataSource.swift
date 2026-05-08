@@ -30,7 +30,7 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
       month: file.monthly?.totals.periodStats ?? .empty,
       lifetime: file.totals.periodStats,
       topSources: file.daily?.totals.requestCount ?? 0 > 0 ? [SourceShare(name: "cockpit", percent: 100)] : [],
-      syncHealth: .syncing,
+      syncHealth: .idle,
       observedAt: observedAt
     )
   }

@@ -27,6 +27,7 @@ struct LocalAIGatewayUsageDataSourceTests {
     #expect(snapshot.lifetime.requests.total == 5)
     #expect(snapshot.topSources.first?.name == "codex")
     #expect(snapshot.topSources.first?.percent == 100)
+    #expect(snapshot.syncHealth == .idle)
   }
 }
 

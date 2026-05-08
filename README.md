@@ -29,7 +29,8 @@ TallyClaw 是一个本地、只读的 macOS token 可观测宠物。它读取本
 │   ├── architecture/
 │   ├── decisions/
 │   └── guides/
-│       └── operations/
+│       ├── agent-onboarding.md
+│       └── figma-migration-checklist.md
 ├── src/
 │   ├── app/
 │   ├── core/
@@ -50,6 +51,7 @@ TallyClaw 是一个本地、只读的 macOS token 可观测宠物。它读取本
 
 - [技术方案](docs/architecture/technical-plan.md)
 - [Agent 接入指南](docs/guides/agent-onboarding.md)
+- [Figma 设计迁移检查清单](docs/guides/figma-migration-checklist.md)
 - [决策记录](docs/decisions/README.md)
 
 ## 本地开发

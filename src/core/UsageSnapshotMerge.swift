@@ -20,8 +20,9 @@ public extension UsageSnapshot {
       month: UsagePeriodStats.merged(snapshots.map(\.month)),
       lifetime: UsagePeriodStats.merged(snapshots.map(\.lifetime)),
       topSources: mergeSourceShares(snapshots.flatMap(\.topSources)),
-      syncHealth: snapshots.contains { $0.syncHealth == .warning } ? .warning : .syncing,
-      observedAt: snapshots.map(\.observedAt).max() ?? first.observedAt
+      syncHealth: snapshots.contains { $0.syncHealth == .warning } ? .warning : .idle,
+      observedAt: snapshots.map(\.observedAt).max() ?? first.observedAt,
+      sourceStatuses: snapshots.flatMap(\.sourceStatuses)
     )
   }
 
@@ -65,4 +66,3 @@ public extension RequestStats {
     )
   }
 }
-

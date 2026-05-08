@@ -2,7 +2,12 @@ import SwiftUI
 import TallyClawCore
 
 public struct TallyClawRootView: View {
+  private static let hoverBubbleWidth: CGFloat = 132
+
   private let snapshot: UsageSnapshot
+  @ObservedObject private var preferences: FloatingWindowPreferences
+  @StateObject private var windowState = FloatingWindowState()
+  @State private var petStageFrame: CGRect = .zero
   @State private var isHovered = false
   @State private var isExpanded = false
   @State private var isPressed = false
@@ -10,8 +15,12 @@ public struct TallyClawRootView: View {
   @State private var lastLifetimeTokens: Int64?
   @State private var activityMonitor = UsageActivityMonitor()
 
-  public init(snapshot: UsageSnapshot = .preview) {
+  public init(
+    snapshot: UsageSnapshot = .preview,
+    preferences: FloatingWindowPreferences = FloatingWindowPreferences()
+  ) {
     self.snapshot = snapshot
+    _preferences = ObservedObject(wrappedValue: preferences)
   }
 
   public var body: some View {
@@ -29,10 +38,12 @@ public struct TallyClawRootView: View {
             .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
         }
       }
-      .frame(width: 280, height: 330)
+      .frame(width: 292, height: 388)
       .padding(.horizontal, 8)
       .padding(.vertical, 8)
-      .background(FloatingWindowConfigurator())
+      .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+      .coordinateSpace(name: "floatingRoot")
+      .background(FloatingWindowConfigurator(windowState: windowState, preferences: preferences))
       .onAppear {
         lastLifetimeTokens = snapshot.lifetime.tokens.total
         _ = activityMonitor.ingest(snapshot, at: Date())
@@ -67,6 +78,7 @@ public struct TallyClawRootView: View {
   @ViewBuilder
   private func petStage(motion: PetMotion, state: PetVisualState) -> some View {
     let palette = PetPalette(state: state)
+    let hoverSide = hoverSide()
 
     ZStack {
       petShadow(motion: motion)
@@ -86,12 +98,20 @@ public struct TallyClawRootView: View {
 
       if isHovered && !isExpanded {
         HoverDataLeaf(snapshot: snapshot, color: palette.main)
-          .offset(x: 68, y: -7)
-          .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .leading)))
+          .offset(x: hoverSide == .right ? 68 : -68, y: -7)
+          .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: hoverSide == .right ? .leading : .trailing)))
       }
     }
     .frame(width: 170, height: 94)
+    .background(
+      GeometryReader { proxy in
+        Color.clear.preference(key: PetStageFramePreferenceKey.self, value: proxy.frame(in: .named("floatingRoot")))
+      }
+    )
     .contentShape(Rectangle())
+    .onPreferenceChange(PetStageFramePreferenceKey.self) { frame in
+      petStageFrame = frame
+    }
     .onHover { hovering in
       withAnimation(.easeInOut(duration: 0.18)) {
         isHovered = hovering
@@ -102,6 +122,35 @@ public struct TallyClawRootView: View {
         isExpanded.toggle()
       }
     }
+    .simultaneousGesture(
+      DragGesture(minimumDistance: 1)
+        .onChanged { _ in
+          windowState.beginDragIfNeeded()
+          windowState.updateDrag(petAnchor: petAnchorInWindow())
+        }
+        .onEnded { _ in
+          windowState.endDrag(saveFrame: preferences.saveFrame)
+        }
+    )
+  }
+
+  private func hoverSide() -> HoverSide {
+    let gap: CGFloat = 18
+    let petCenterX = windowState.frame.minX + petAnchorInWindow().x
+    let rightSpace = windowState.visibleFrame.maxX - petCenterX
+    let leftSpace = petCenterX - windowState.visibleFrame.minX
+
+    if rightSpace < Self.hoverBubbleWidth + gap, leftSpace > Self.hoverBubbleWidth + gap {
+      return .left
+    }
+    return .right
+  }
+
+  private func petAnchorInWindow() -> CGPoint {
+    if petStageFrame != .zero {
+      return CGPoint(x: petStageFrame.midX, y: petStageFrame.midY)
+    }
+    return CGPoint(x: windowState.frame.width / 2, y: windowState.frame.height / 2)
   }
 
   private func emitTokenPulse(count: Int = 3) {
@@ -130,6 +179,19 @@ private enum PetVisualState {
   case idle
   case highActivity
   case warning
+}
+
+private enum HoverSide {
+  case left
+  case right
+}
+
+private struct PetStageFramePreferenceKey: PreferenceKey {
+  static let defaultValue: CGRect = .zero
+
+  static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+    value = nextValue()
+  }
 }
 
 private struct PetPalette {
@@ -390,7 +452,7 @@ private struct ExpandedDataStrip: View {
   let color: Color
 
   var body: some View {
-    VStack(spacing: 7) {
+    VStack(spacing: 8) {
       HStack {
         Label("本地来源", systemImage: "externaldrive.connected.to.line.below")
           .font(.system(size: 10, weight: .regular))
@@ -401,8 +463,10 @@ private struct ExpandedDataStrip: View {
         StatusDot(color: color)
       }
 
-      HStack(spacing: 7) {
+      LazyVGrid(columns: [GridItem(.flexible(), spacing: 7), GridItem(.flexible(), spacing: 7)], spacing: 7) {
         MiniMetric(title: "今日", value: snapshot.today.tokens.total.formattedCompact.lowercased())
+        MiniMetric(title: "7 天", value: snapshot.week.tokens.total.formattedCompact.lowercased())
+        MiniMetric(title: "30 天", value: snapshot.month.tokens.total.formattedCompact.lowercased())
         MiniMetric(title: "总计", value: snapshot.lifetime.tokens.total.formattedCompact.lowercased())
       }
 
@@ -420,7 +484,7 @@ private struct ExpandedDataStrip: View {
       .background(Color.white.opacity(0.045), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
     .padding(12)
-    .frame(width: 216)
+    .frame(width: 236)
     .background(Color(red: 0.04, green: 0.07, blue: 0.13).opacity(0.92), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -436,7 +500,7 @@ private struct MiniMetric: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
-      Text(title.uppercased())
+      Text(title)
         .font(.system(size: 8.5, weight: .regular))
         .foregroundStyle(Color(red: 0.42, green: 0.48, blue: 0.56))
       Text(value)

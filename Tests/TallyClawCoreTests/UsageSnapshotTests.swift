@@ -8,7 +8,7 @@ struct UsageSnapshotTests {
     let snapshot = UsageSnapshot.preview
 
     #expect(snapshot.today.tokens.total.formattedCompact == "1.28M")
-    #expect(snapshot.week.tokens.total.formattedCompact == "8.64M")
+    #expect(snapshot.week.tokens.total.formattedCompact == "8.26M")
   }
 
   @Test("reports success rate as a rounded percentage")
@@ -25,4 +25,3 @@ struct UsageSnapshotTests {
     #expect(SourceAccessPolicy.default.allowsSourceMutation == false)
   }
 }
-

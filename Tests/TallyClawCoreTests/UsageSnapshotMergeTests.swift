@@ -41,4 +41,36 @@ struct UsageSnapshotMergeTests {
     #expect(merged.today.requests.averageLatencyMilliseconds == 1_347)
     #expect(merged.observedAt == max(first.observedAt, second.observedAt))
   }
+
+  @Test("marks merged successful snapshots idle unless a source reports warning")
+  func marksSuccessfulMergedSnapshotsIdle() {
+    let first = makeSnapshot(health: .idle)
+    let second = makeSnapshot(health: .idle)
+
+    let merged = UsageSnapshot.merged([first, second])
+
+    #expect(merged.syncHealth == .idle)
+  }
+
+  @Test("keeps warning when any merged source reports warning")
+  func keepsWarningWhenAnySourceWarns() {
+    let first = makeSnapshot(health: .idle)
+    let second = makeSnapshot(health: .warning)
+
+    let merged = UsageSnapshot.merged([first, second])
+
+    #expect(merged.syncHealth == .warning)
+  }
+}
+
+private func makeSnapshot(health: SyncHealth) -> UsageSnapshot {
+  UsageSnapshot(
+    today: .empty,
+    week: .empty,
+    month: .empty,
+    lifetime: .empty,
+    topSources: [],
+    syncHealth: health,
+    observedAt: Date(timeIntervalSince1970: 1_700_000_000)
+  )
 }

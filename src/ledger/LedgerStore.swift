@@ -7,6 +7,7 @@ private let sqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self
 public protocol LedgerStore: Sendable {
   func latestSnapshot() async -> UsageSnapshot
   func record(_ snapshot: UsageSnapshot, sourceID: String) async throws
+  func recordSourceStatuses(_ statuses: [SourceReadStatus]) async throws
 }
 
 public actor InMemoryLedgerStore: LedgerStore {
@@ -23,6 +24,8 @@ public actor InMemoryLedgerStore: LedgerStore {
   public func record(_ snapshot: UsageSnapshot, sourceID: String) {
     snapshotsBySource[sourceID] = snapshot
   }
+
+  public func recordSourceStatuses(_ statuses: [SourceReadStatus]) {}
 }
 
 public actor SQLiteLedgerStore: LedgerStore {
@@ -60,8 +63,9 @@ public actor SQLiteLedgerStore: LedgerStore {
         month: try database.aggregate(period: .month, key: periodKey(for: .month, at: observedAt)),
         lifetime: try database.aggregate(period: .lifetime, key: PeriodKind.lifetime.staticKey),
         topSources: try database.topSources(),
-        syncHealth: .syncing,
-        observedAt: try database.latestObservedAt() ?? observedAt
+        syncHealth: .idle,
+        observedAt: try database.latestObservedAt() ?? observedAt,
+        sourceStatuses: try database.readSourceStatuses()
       )
     } catch {
       return UsageSnapshot(
@@ -108,6 +112,12 @@ public actor SQLiteLedgerStore: LedgerStore {
       stats: snapshot.lifetime,
       observedAt: snapshot.observedAt
     )
+  }
+
+  public func recordSourceStatuses(_ statuses: [SourceReadStatus]) async throws {
+    let database = try SQLiteLedgerDatabase.open(at: databaseURL)
+    defer { database.close() }
+    try database.replaceSourceStatuses(statuses)
   }
 
   public static func defaultDatabaseURL() -> URL {
@@ -190,6 +200,16 @@ private final class SQLiteLedgerDatabase {
     try execute("""
       CREATE INDEX IF NOT EXISTS idx_source_period_stats_period
       ON source_period_stats (period_kind, period_key);
+      """)
+    try execute("""
+      CREATE TABLE IF NOT EXISTS source_read_statuses (
+        source_id TEXT NOT NULL PRIMARY KEY,
+        display_name TEXT NOT NULL,
+        state TEXT NOT NULL,
+        last_read_at_ms INTEGER NOT NULL,
+        last_observed_at_ms INTEGER,
+        error_summary TEXT
+      );
       """)
   }
 
@@ -322,6 +342,76 @@ private final class SQLiteLedgerDatabase {
     let milliseconds = sqlite3_column_int64(statement, 0)
     guard milliseconds > 0 else { return nil }
     return Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
+  }
+
+  func replaceSourceStatuses(_ statuses: [SourceReadStatus]) throws {
+    try execute("DELETE FROM source_read_statuses;")
+    guard !statuses.isEmpty else { return }
+
+    let sql = """
+      INSERT INTO source_read_statuses (
+        source_id, display_name, state, last_read_at_ms, last_observed_at_ms, error_summary
+      ) VALUES (?1, ?2, ?3, ?4, ?5, ?6);
+      """
+    let statement = try prepare(sql)
+    defer { sqlite3_finalize(statement) }
+
+    for status in statuses {
+      sqlite3_reset(statement)
+      sqlite3_clear_bindings(statement)
+      bindText(status.sourceID, to: statement, index: 1)
+      bindText(status.displayName, to: statement, index: 2)
+      bindText(status.state.rawValue, to: statement, index: 3)
+      sqlite3_bind_int64(statement, 4, Int64(status.lastReadAt.timeIntervalSince1970 * 1_000))
+      if let lastObservedAt = status.lastObservedAt {
+        sqlite3_bind_int64(statement, 5, Int64(lastObservedAt.timeIntervalSince1970 * 1_000))
+      } else {
+        sqlite3_bind_null(statement, 5)
+      }
+      if let errorSummary = status.errorSummary {
+        bindText(errorSummary, to: statement, index: 6)
+      } else {
+        sqlite3_bind_null(statement, 6)
+      }
+
+      guard sqlite3_step(statement) == SQLITE_DONE else {
+        throw error("Failed to persist source read statuses.")
+      }
+    }
+  }
+
+  func readSourceStatuses() throws -> [SourceReadStatus] {
+    let sql = """
+      SELECT source_id, display_name, state, last_read_at_ms, last_observed_at_ms, error_summary
+      FROM source_read_statuses
+      ORDER BY source_id ASC;
+      """
+    let statement = try prepare(sql)
+    defer { sqlite3_finalize(statement) }
+
+    var statuses: [SourceReadStatus] = []
+    while sqlite3_step(statement) == SQLITE_ROW {
+      let sourceID = sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "unknown"
+      let displayName = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? sourceID
+      let rawState = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? SourceReadState.failed.rawValue
+      let state = SourceReadState(rawValue: rawState) ?? .failed
+      let lastReadAt = Date(timeIntervalSince1970: Double(sqlite3_column_int64(statement, 3)) / 1_000)
+      let lastObservedMillis = sqlite3_column_type(statement, 4) == SQLITE_NULL ? nil : sqlite3_column_int64(statement, 4)
+      let lastObservedAt = lastObservedMillis.map { Date(timeIntervalSince1970: Double($0) / 1_000) }
+      let errorSummary = sqlite3_column_text(statement, 5).map { String(cString: $0) }
+
+      statuses.append(
+        SourceReadStatus(
+          sourceID: sourceID,
+          displayName: displayName,
+          state: state,
+          lastReadAt: lastReadAt,
+          lastObservedAt: lastObservedAt,
+          errorSummary: errorSummary
+        )
+      )
+    }
+    return statuses
   }
 
   private func storedStats(sourceID: String, period: PeriodKind, key: String) throws -> StoredPeriodStats? {

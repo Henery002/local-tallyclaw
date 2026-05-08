@@ -20,3 +20,8 @@
 ## 语言规范
 
 项目文档默认使用中文维护。必要的技术名词、路径、模块名、字段名和代码标识可以保留英文。
+
+## 常用入口
+
+- [Agent 接入指南](guides/agent-onboarding.md)
+- [Figma 设计迁移检查清单](guides/figma-migration-checklist.md)

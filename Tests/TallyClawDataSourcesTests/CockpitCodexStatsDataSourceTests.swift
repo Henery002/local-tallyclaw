@@ -21,10 +21,11 @@ struct CockpitCodexStatsDataSourceTests {
     #expect(snapshot.today.tokens.output == 200)
     #expect(snapshot.today.tokens.cache == 300)
     #expect(snapshot.today.tokens.thinking == 40)
-    #expect(snapshot.week.tokens.total == 3_080)
+    #expect(snapshot.week.tokens.total == 2_580)
     #expect(snapshot.month.requests.total == 40)
     #expect(snapshot.lifetime.requests.total == 100)
     #expect(snapshot.topSources == [SourceShare(name: "cockpit", percent: 100)])
+    #expect(snapshot.syncHealth == .idle)
   }
 }
 
