@@ -26,17 +26,8 @@ struct TallyClawApp: App {
     }
 
     MenuBarExtra("TallyClaw", systemImage: "pawprint.fill") {
-      Button("显示主界面") {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.windows.forEach { window in
-          window.orderFrontRegardless()
-        }
-      }
-
-      Button("隐藏主界面") {
-        NSApp.windows.forEach { window in
-          window.orderOut(nil)
-        }
+      Button(mainWindowVisible ? "隐藏主界面" : "显示主界面") {
+        toggleMainWindow()
       }
 
       Divider()
@@ -57,17 +48,48 @@ struct TallyClawApp: App {
       SettingsLink {
         Text("设置...")
       }
+
+      Divider()
+
+      Button("退出 TallyClaw") {
+        appDelegate.allowRealTerminate = true
+        NSApp.terminate(nil)
+      }
+    }
+  }
+
+  private var mainWindowVisible: Bool {
+    NSApp.windows.contains { window in
+      window.isVisible
+    }
+  }
+
+  private func toggleMainWindow() {
+    if mainWindowVisible {
+      NSApp.windows.forEach { window in
+        window.orderOut(nil)
+      }
+    } else {
+      NSApp.activate(ignoringOtherApps: true)
+      NSApp.windows.forEach { window in
+        window.orderFrontRegardless()
+      }
     }
   }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+  var allowRealTerminate = false
+
   func applicationDidFinishLaunching(_ notification: Notification) {
     NSApp.setActivationPolicy(.accessory)
     NSApp.activate(ignoringOtherApps: true)
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    if allowRealTerminate {
+      return .terminateNow
+    }
     sender.windows.forEach { window in
       window.orderOut(nil)
     }
