@@ -39,6 +39,8 @@
 - 将 app 数据路径从“直接展示只读源临时合并快照”调整为“只读源写入 TallyClaw 自有 ledger，再由 UI 读取 ledger 聚合结果”。
 - 将首版 SwiftUI 宠物浮窗 UI 替换为 Figma Version 18 设计翻译版，包含独立宠物本体、状态色、idle/high/warning 动效、token 粒子、hover 数据叶片和 click 展开数据条。
 - 将应用窗口调整为更小的透明无边框浮窗，并隐藏传统窗口按钮，弱化 widget / dashboard 感。
+- 微调宠物浮窗 UI：移除宠物外圈背景、降低 idle/高活跃状态动效幅度、缩小宠物本体、修复 hover 数据叶片与底部展开面板裁切，并让点击面板从宠物下方展开且显示中文观测数据。
+- 增加真实用量活动监视器，宠物 activity 状态改为由 lifetime token / request 增量触发，并在短暂活跃窗口后自动回落 idle，避免仅因已有历史用量长期保持 activity。
 - 将数据刷新从启动时单次读取调整为 5 秒准实时轮询，以便 UI 后续反映 token 增长。
 - 将存量项目文档统一转换为中文，并明确后续文档默认以中文维护。
 - 将文档维护规则收敛为轻量模式：默认只维护 `CHANGELOG.md`，停止继续维护 `docs/records/` 类过程记录目录。

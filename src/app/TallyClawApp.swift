@@ -7,13 +7,13 @@ struct TallyClawApp: App {
   var body: some Scene {
     WindowGroup("TallyClaw") {
       TallyClawHostView()
-        .frame(width: 300, height: 240)
+        .frame(width: 296, height: 352)
         .background(Color.clear)
         .containerBackground(.clear, for: .window)
     }
     .windowStyle(.hiddenTitleBar)
     .windowResizability(.contentSize)
-    .defaultSize(width: 300, height: 240)
+    .defaultSize(width: 296, height: 352)
 
     Settings {
       Text("TallyClaw 设置将在后续接入。")

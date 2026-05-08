@@ -27,9 +27,12 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
     window.hasShadow = false
     window.titleVisibility = .hidden
     window.titlebarAppearsTransparent = true
+    window.titlebarSeparatorStyle = .none
     window.isMovableByWindowBackground = true
     window.collectionBehavior.insert(.canJoinAllSpaces)
     window.collectionBehavior.insert(.fullScreenAuxiliary)
+    window.styleMask.remove(.titled)
+    window.styleMask.insert(.borderless)
     window.styleMask.insert(.fullSizeContentView)
 
     window.contentView?.wantsLayer = true
@@ -51,11 +54,11 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
   }
 
   private func position(_ window: NSWindow) {
-    let size = NSSize(width: 300, height: 240)
+    let size = NSSize(width: 296, height: 352)
     let screenFrame = window.screen?.visibleFrame ?? NSScreen.main?.visibleFrame ?? .zero
     let origin = NSPoint(
       x: screenFrame.minX + 72,
-      y: screenFrame.maxY - size.height - 96
+      y: screenFrame.maxY - size.height - 72
     )
     window.setFrame(NSRect(origin: origin, size: size), display: true)
   }
