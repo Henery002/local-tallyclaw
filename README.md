@@ -9,7 +9,7 @@ TallyClaw 是一个本地、只读的 macOS token 可观测宠物。它读取本
 - 为本地 token 数据源提供只读适配器，优先覆盖 cockpit tools 与 `local-ai-gateway`。
 - 独立持久化日、周、月、永久总量等 token 统计。
 - 提供轻量桌面宠物 UI，支持流畅动画、拖动放置和简约观测状态。
-- 沉淀产品决策、架构变更、迭代记录、修复记录和长期运维状态，服务后续 AI Agent 接入与持续开发。
+- 使用 `CHANGELOG.md` 简要记录功能迭代、问题修复和重要变更，避免维护过重的记录体系。
 
 ## 非目标
 
@@ -28,8 +28,7 @@ TallyClaw 是一个本地、只读的 macOS token 可观测宠物。它读取本
 │   ├── README.md
 │   ├── architecture/
 │   ├── decisions/
-│   ├── guides/
-│   └── records/
+│   └── guides/
 │       └── operations/
 ├── src/
 │   ├── app/
@@ -37,29 +36,40 @@ TallyClaw 是一个本地、只读的 macOS token 可观测宠物。它读取本
 │   ├── data-sources/
 │   ├── ledger/
 │   └── ui/
+├── script/
+│   └── build_and_run.sh
 ├── assets/
 │   ├── pet/
 │   └── icons/
 └── tools/
 ```
 
-根目录保持克制，只放仓库入口文件。新的设计说明、讨论记录、实现日志和排障记录应放入 `docs/records/` 或 `docs/decisions/`，不要散落在根目录。
+根目录保持克制，只放仓库入口文件。默认不要新增零散记录文档；功能迭代、问题修复和重要变更统一简要写入 `CHANGELOG.md`。只有长期有效的架构说明或决策，才放入 `docs/architecture/` 或 `docs/decisions/`。
 
 ## 文档入口
 
 - [技术方案](docs/architecture/technical-plan.md)
-- [项目记录索引](docs/records/README.md)
-- [长期运维状态](docs/records/operations/current-state.md)
 - [Agent 接入指南](docs/guides/agent-onboarding.md)
 - [决策记录](docs/decisions/README.md)
 
-## 面向 Agent 优先的维护原则
+## 本地开发
 
-本项目后续默认由 AI Agent，尤其是 Codex，作为主力开发者持续推进。因此文档不只面向人类阅读，也必须能让新的 Agent 快速继承上下文、判断边界、继续开发。
+当前工程使用 SwiftPM 组织 macOS 原生应用。
 
-每次重要工作结束前，应同步更新：
+常用命令：
 
-- `CHANGELOG.md`：按日期降序记录用户可见、结构性、功能迭代、问题修复或重要文档变更。
-- `docs/records/iteration-log.md`：记录高层进展。
-- `docs/records/operations/current-state.md`：记录当前状态、下一步和风险。
-- 必要时更新 `docs/records/discussions/`、`docs/records/fixes/` 或 `docs/decisions/` 下的专项记录。
+- `swift test`：运行核心测试。
+- `swift build`：编译全部 SwiftPM target。
+- `./script/build_and_run.sh`：构建并以 `.app` 形式启动 TallyClaw。
+- `./script/build_and_run.sh --verify`：启动后检查进程是否存在。
+
+## 维护原则
+
+本项目后续仍会大量通过 AI Agent 开发，但文档维护需要保持轻量。不要为了每次讨论、每个阶段性实现或每个设计资源额外创建记录文件。
+
+默认维护规则：
+
+- `CHANGELOG.md`：唯一默认迭代记录入口，按日期降序简要记录功能迭代、问题修复和重要结构变更。
+- `docs/architecture/`：仅维护长期有效的架构、数据流和能力边界。
+- `docs/decisions/`：仅在存在长期有效且需要保留取舍原因的架构决策时维护。
+- `docs/guides/`：仅维护稳定的开发或 Agent 接入规则。
