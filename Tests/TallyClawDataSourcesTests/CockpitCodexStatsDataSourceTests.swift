@@ -7,8 +7,9 @@ import TallyClawDataSources
 struct CockpitCodexStatsDataSourceTests {
   @Test("reads aggregate totals without exposing account identity")
   func readsAggregateTotalsWithoutExposingAccountIdentity() async throws {
-    let statsURL = try makeFixtureStatsFile()
-    let dataSource = CockpitCodexStatsDataSource(statsURL: statsURL)
+    let now = Date(timeIntervalSince1970: 1_700_000_200)
+    let statsURL = try makeFixtureStatsFile(dailySince: 1_700_000_000_000)
+    let dataSource = CockpitCodexStatsDataSource(statsURL: statsURL, now: { now })
 
     let snapshot = try #require(try await dataSource.readSnapshot())
 
@@ -27,9 +28,33 @@ struct CockpitCodexStatsDataSourceTests {
     #expect(snapshot.topSources == [SourceShare(name: "cockpit", percent: 100)])
     #expect(snapshot.syncHealth == .idle)
   }
+
+  @Test("discards daily window when cockpit since is before start of today")
+  func discardsStaleDailyWindow() async throws {
+    // dailySince is 48 hours before `now` – a stale rolling window
+    let now = Date(timeIntervalSince1970: 1_700_172_800)  // ~2 days later
+    let statsURL = try makeFixtureStatsFile(dailySince: 1_700_000_000_000)
+    let dataSource = CockpitCodexStatsDataSource(
+      statsURL: statsURL,
+      calendar: {
+        var c = Calendar(identifier: .gregorian)
+        c.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+        return c
+      }(),
+      now: { now }
+    )
+
+    let snapshot = try #require(try await dataSource.readSnapshot())
+
+    // Daily window spans before today so should be discarded
+    #expect(snapshot.today.tokens.input == 0)
+    #expect(snapshot.today.requests.total == 0)
+    // Lifetime is always available regardless of window validation
+    #expect(snapshot.lifetime.requests.total == 100)
+  }
 }
 
-private func makeFixtureStatsFile() throws -> URL {
+private func makeFixtureStatsFile(dailySince: Int64 = 1_700_000_000_000) throws -> URL {
   let directory = FileManager.default.temporaryDirectory
     .appendingPathComponent(UUID().uuidString, isDirectory: true)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -40,7 +65,7 @@ private func makeFixtureStatsFile() throws -> URL {
     "since": 1700000000000,
     "updatedAt": 1700000100000,
     "daily": {
-      "since": 1700000000000,
+      "since": \(dailySince),
       "updatedAt": 1700000100000,
       "totals": {
         "requestCount": 10,
@@ -55,6 +80,7 @@ private func makeFixtureStatsFile() throws -> URL {
       }
     },
     "weekly": {
+      "since": 1699500000000,
       "totals": {
         "requestCount": 20,
         "successCount": 18,
@@ -68,6 +94,7 @@ private func makeFixtureStatsFile() throws -> URL {
       }
     },
     "monthly": {
+      "since": 1697500000000,
       "totals": {
         "requestCount": 40,
         "successCount": 37,

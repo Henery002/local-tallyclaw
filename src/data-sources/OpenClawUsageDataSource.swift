@@ -25,13 +25,35 @@ public struct OpenClawUsageDataSource: UsageDataSource {
       return nil
     }
 
+    let gatewayBackedProviders = try readGatewayBackedProviders()
+
+    // Collect events from both legacy .usage-ledger.json files and the
+    // newer trajectory .jsonl files. Use a shared deduplication set so
+    // the same model completion is never counted twice.
+    var dedupeKeys = Set<String>()
+    var events: [OpenClawUsageEvent] = []
+
+    // 1. Legacy usage-ledger (may have stopped writing, but still holds
+    //    historical data that predates trajectory files).
     let ledgerURLs = try findUsageLedgerURLs()
-    guard !ledgerURLs.isEmpty else {
-      return nil
+    for url in ledgerURLs {
+      let ledgerEvents = try readLedgerEvents(from: url, excludingProviders: gatewayBackedProviders)
+      for event in ledgerEvents {
+        if dedupeKeys.insert(event.dedupeKey).inserted {
+          events.append(event)
+        }
+      }
     }
 
-    let gatewayBackedProviders = try readGatewayBackedProviders()
-    let events = try ledgerURLs.flatMap { try readEvents(from: $0, excludingProviders: gatewayBackedProviders) }
+    // 2. Trajectory files – the actively written session records that
+    //    contain model.completed events with full usage data.
+    let trajectoryEvents = try readTrajectoryEvents(excludingProviders: gatewayBackedProviders)
+    for event in trajectoryEvents {
+      if dedupeKeys.insert(event.dedupeKey).inserted {
+        events.append(event)
+      }
+    }
+
     guard !events.isEmpty else {
       return nil
     }
@@ -49,6 +71,8 @@ public struct OpenClawUsageDataSource: UsageDataSource {
       observedAt: observedAt
     )
   }
+
+  // MARK: - Legacy usage-ledger.json
 
   private func findUsageLedgerURLs() throws -> [URL] {
     let agentsURL = rootURL.appendingPathComponent("agents")
@@ -69,6 +93,170 @@ public struct OpenClawUsageDataSource: UsageDataSource {
     }
   }
 
+  private func readLedgerEvents(from ledgerURL: URL, excludingProviders: Set<String>) throws -> [OpenClawUsageEvent] {
+    let data = try Data(contentsOf: ledgerURL, options: [.mappedIfSafe])
+    let ledger = try JSONDecoder().decode(OpenClawUsageLedger.self, from: data)
+    return ledger.events.compactMap { key, event in
+      guard !excludingProviders.contains(event.provider) else { return nil }
+      guard event.usage.total > 0 else { return nil }
+      return OpenClawUsageEvent(
+        dedupeKey: "ledger:\(key)",
+        observedAt: Date(timeIntervalSince1970: Double(event.ts) / 1_000),
+        sourceName: event.provider,
+        requestCount: 1,
+        inputTokens: event.usage.input,
+        outputTokens: event.usage.output,
+        cacheTokens: event.usage.cacheRead + event.usage.cacheWrite,
+        reasoningTokens: 0
+      )
+    }
+  }
+
+  // MARK: - Trajectory .jsonl files
+
+  private func readTrajectoryEvents(excludingProviders: Set<String>) throws -> [OpenClawUsageEvent] {
+    let agentsURL = rootURL.appendingPathComponent("agents")
+    guard FileManager.default.fileExists(atPath: agentsURL.path) else {
+      return []
+    }
+
+    let agentDirs = try FileManager.default.contentsOfDirectory(
+      at: agentsURL,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    )
+
+    var events: [OpenClawUsageEvent] = []
+
+    for agentDir in agentDirs {
+      // Read from both active sessions/ and any sessions.bak.* directories
+      // so that historical data from session rotations is not lost.
+      let sessionsDirs = try sessionsDirectories(in: agentDir)
+      for sessionsDir in sessionsDirs {
+        let trajectoryFiles = try findTrajectoryFiles(in: sessionsDir)
+        for trajectoryURL in trajectoryFiles {
+          let fileEvents = try readTrajectoryFile(
+            at: trajectoryURL,
+            excludingProviders: excludingProviders
+          )
+          events.append(contentsOf: fileEvents)
+        }
+      }
+    }
+
+    return events
+  }
+
+  private func sessionsDirectories(in agentDir: URL) throws -> [URL] {
+    let contents = try FileManager.default.contentsOfDirectory(
+      at: agentDir,
+      includingPropertiesForKeys: [.isDirectoryKey],
+      options: [.skipsHiddenFiles]
+    )
+
+    return contents.filter { url in
+      let name = url.lastPathComponent
+      guard name == "sessions" || name.hasPrefix("sessions.bak.") else { return false }
+      return (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+    }
+  }
+
+  private func findTrajectoryFiles(in sessionsDir: URL) throws -> [URL] {
+    let contents = try FileManager.default.contentsOfDirectory(
+      at: sessionsDir,
+      includingPropertiesForKeys: nil,
+      options: [.skipsHiddenFiles]
+    )
+
+    return contents.filter { $0.lastPathComponent.hasSuffix(".trajectory.jsonl") }
+  }
+
+  private func readTrajectoryFile(
+    at url: URL,
+    excludingProviders: Set<String>
+  ) throws -> [OpenClawUsageEvent] {
+    let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+    guard let content = String(data: data, encoding: .utf8) else { return [] }
+
+    var events: [OpenClawUsageEvent] = []
+
+    for line in content.split(separator: "\n") where !line.isEmpty {
+      guard let lineData = line.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
+            let type = obj["type"] as? String,
+            type == "model.completed" || type == "prompt.submitted"
+      else { continue }
+
+      let provider = obj["provider"] as? String ?? "unknown"
+      guard !excludingProviders.contains(provider) else { continue }
+
+      let isPrompt = (type == "prompt.submitted")
+      
+      let input: Int64
+      let output: Int64
+      let cacheRead: Int64
+      let requestCount: Int
+      
+      if isPrompt {
+        input = 0
+        output = 0
+        cacheRead = 0
+        requestCount = 1
+      } else {
+        // Extract usage from data.usage (primary) or top-level usage (fallback)
+        let usage: [String: Any]?
+        if let dataDict = obj["data"] as? [String: Any] {
+          usage = dataDict["usage"] as? [String: Any]
+        } else {
+          usage = obj["usage"] as? [String: Any]
+        }
+  
+        guard let usage,
+              let total = usage["total"] as? Int64, total > 0
+        else { continue }
+        
+        input = usage["input"] as? Int64 ?? 0
+        output = usage["output"] as? Int64 ?? 0
+        cacheRead = usage["cacheRead"] as? Int64 ?? 0
+        requestCount = 0
+      }
+
+      // Build a stable deduplication key.
+      let traceId = obj["traceId"] as? String ?? url.deletingPathExtension().lastPathComponent
+      let seq = obj["seq"] as? Int ?? 0
+      let runId = obj["runId"] as? String ?? "\(obj["ts"] ?? "")"
+      let suffix = isPrompt ? "prompt" : "model"
+      let dedupeKey = "traj:\(traceId):\(runId):\(seq):\(suffix)"
+
+      // Parse timestamp – trajectory uses ISO 8601 string
+      let observedAt: Date
+      if let tsString = obj["ts"] as? String {
+        observedAt = Self.parseISO8601(tsString) ?? Date(timeIntervalSince1970: 0)
+      } else if let tsNumber = obj["ts"] as? Double {
+        observedAt = Date(timeIntervalSince1970: tsNumber / 1_000)
+      } else {
+        observedAt = Date(timeIntervalSince1970: 0)
+      }
+
+      let modelId = obj["modelId"] as? String ?? provider
+
+      events.append(OpenClawUsageEvent(
+        dedupeKey: dedupeKey,
+        observedAt: observedAt,
+        sourceName: modelId,
+        requestCount: requestCount,
+        inputTokens: input,
+        outputTokens: output,
+        cacheTokens: cacheRead,
+        reasoningTokens: 0
+      ))
+    }
+
+    return events
+  }
+
+  // MARK: - Gateway provider detection
+
   private func readGatewayBackedProviders() throws -> Set<String> {
     let configURL = rootURL.appendingPathComponent("openclaw.json")
     guard FileManager.default.fileExists(atPath: configURL.path) else {
@@ -82,24 +270,26 @@ public struct OpenClawUsageDataSource: UsageDataSource {
     })
   }
 
-  private func readEvents(from ledgerURL: URL, excludingProviders: Set<String>) throws -> [OpenClawUsageEvent] {
-    let data = try Data(contentsOf: ledgerURL, options: [.mappedIfSafe])
-    let ledger = try JSONDecoder().decode(OpenClawUsageLedger.self, from: data)
-    return ledger.events.compactMap { key, event in
-      guard !excludingProviders.contains(event.provider) else { return nil }
-      guard event.usage.total > 0 else { return nil }
-      return OpenClawUsageEvent(
-        dedupeKey: key,
-        observedAt: Date(timeIntervalSince1970: Double(event.ts) / 1_000),
-        sourceName: event.provider,
-        inputTokens: event.usage.input,
-        outputTokens: event.usage.output,
-        cacheTokens: event.usage.cacheRead + event.usage.cacheWrite,
-        reasoningTokens: 0
-      )
-    }
+  // MARK: - ISO 8601 parsing
+
+  nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter
+  }()
+
+  nonisolated(unsafe) private static let iso8601FormatterNoFraction: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter
+  }()
+
+  private static func parseISO8601(_ string: String) -> Date? {
+    iso8601Formatter.date(from: string) ?? iso8601FormatterNoFraction.date(from: string)
   }
 }
+
+// MARK: - Decodable models (legacy usage-ledger)
 
 private struct OpenClawConfigFile: Decodable {
   let models: OpenClawModelsConfig
@@ -135,11 +325,13 @@ private struct OpenClawUsageCounters: Decodable {
   let total: Int64
 }
 
+// MARK: - Unified event model
+
 private struct OpenClawUsageEvent: UsageEventLike {
   let dedupeKey: String
   let observedAt: Date
   let sourceName: String
-  let requestCount: Int = 1
+  let requestCount: Int
   let inputTokens: Int64
   let outputTokens: Int64
   let cacheTokens: Int64

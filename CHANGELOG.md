@@ -18,6 +18,20 @@
 - `安全`：安全、隐私、凭据、只读边界相关变更。
 - `文档`：文档结构、维护规则或说明调整。
 
+## 2026-05-09
+
+### 新增
+
+- 增加对 OpenClaw `.trajectory.jsonl` 会话轨迹文件的读取支持，以兼容最新的 OpenClaw 用量记录机制。现已能够全面统计所有 Agent（包括 main、ops 等）和所有交互通道（Web 端、飞书 DM、企业微信群、Cron 任务）产生的会话 token，并自动排除已由 local-ai-gateway 代理的模型（如 openai）以避免重复计算。
+  - **热修复**：修正了解析逻辑中因为复用 `traceId` 与 `seq` 导致同一个 Session 内的多次运行（多轮对话）数据被误伤去重的问题，已引入 `runId` 确保单次模型生成事件的绝对唯一。
+  - **实时性优化**：通过额外解析 `.trajectory.jsonl` 中的 `prompt.submitted` 提词提交事件，成功实现了用量监视器的“0延迟启动”响应；同时将原本为兼容 Cockpit 长轮询而设置的 30s+15s 活跃尾盘激进缩减至 8s+8s，彻底解决了由于等待超时导致的宠物“延迟停滞”现象。
+
+### 修复
+
+- 修复开机自启后出现 2 个菜单栏图标且宠物不显示的问题：`WindowGroup` 替换为 `Window` 单实例 scene，增加 `disableRelaunchOnLogin()` 防止系统双重启动，延迟激活窗口确保 scene 实例化完成，`toggleMainWindow` 精准定位主宠物窗口。
+- 修复「今日」token 显示未在 0 时重置的问题：cockpit tools 的 `daily` 是滚动 24h 窗口而非日历天，增加 `validatedPeriodStats()` 校验每个窗口的 `since` 时间戳，跨越日历边界的窗口返回空值避免膨胀；同时清理 ledger 中已污染的 today 记录。
+- 修复宠物在活跃期间短暂回落 idle 的抖动问题：活跃持续时间从 6s 增至 30s，增加 15s 渐进冷却扩展，`activeUntil` 只延长不收缩，覆盖模型交互中工具调用和文件写入等自然暂停。
+
 ## 2026-05-08
 
 ### 新增

@@ -8,7 +8,7 @@ struct TallyClawApp: App {
   @StateObject private var appPreferences = AppPreferences()
 
   var body: some Scene {
-    WindowGroup("TallyClaw") {
+    Window("TallyClaw", id: "main") {
       TallyClawHostView(floatingPreferences: floatingPreferences)
         .frame(width: 308, height: 420, alignment: .top)
         .background(Color.clear)
@@ -59,20 +59,35 @@ struct TallyClawApp: App {
   }
 
   private var mainWindowVisible: Bool {
-    NSApp.windows.contains { window in
-      window.isVisible
+    mainWindow?.isVisible ?? false
+  }
+
+  /// Find the single main pet window, excluding MenuBarExtra helper windows
+  /// and settings panels.
+  private var mainWindow: NSWindow? {
+    NSApp.windows.first { window in
+      // MenuBarExtra creates small utility panels; settings window has its own identifier.
+      // The main pet window carries the "TallyClaw" title or the "main" identifier.
+      guard window.level != .statusBar else { return false }
+      guard !window.className.contains("MenuBarExtraWindow") else { return false }
+      guard window.identifier?.rawValue != "com_apple_SwiftUI_Settings_window" else { return false }
+      return window.contentView != nil
     }
   }
 
   private func toggleMainWindow() {
-    if mainWindowVisible {
-      NSApp.windows.forEach { window in
-        window.orderOut(nil)
-      }
+    if let window = mainWindow, window.isVisible {
+      window.orderOut(nil)
     } else {
       NSApp.activate(ignoringOtherApps: true)
-      NSApp.windows.forEach { window in
+      if let window = mainWindow {
+        window.makeKeyAndOrderFront(nil)
         window.orderFrontRegardless()
+      } else {
+        // Window not yet created – open the Window scene by its identifier.
+        if let url = URL(string: "tallyclaw://main") {
+          NSWorkspace.shared.open(url)
+        }
       }
     }
   }
@@ -82,8 +97,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
   var allowRealTerminate = false
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    // Prevent macOS from re-opening the app a second time on login
+    // (SMAppService already handles launch-at-login).
+    NSApp.disableRelaunchOnLogin()
     NSApp.setActivationPolicy(.accessory)
-    NSApp.activate(ignoringOtherApps: true)
+
+    // Small delay so the Window scene has time to materialise its NSWindow,
+    // then bring it to front.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+      NSApp.activate(ignoringOtherApps: true)
+      NSApp.windows.forEach { window in
+        if window.contentView != nil, !window.className.contains("MenuBarExtraWindow") {
+          window.makeKeyAndOrderFront(nil)
+          window.orderFrontRegardless()
+        }
+      }
+    }
   }
 
   func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
