@@ -19,7 +19,6 @@ public struct UsageActivityMonitor: Equatable, Sendable {
   private let cooldownExtension: TimeInterval
 
   private var lastLifetimeTokens: Int64?
-  private var lastLifetimeRequests: Int?
   private var activeUntil: Date?
 
   /// Number of consecutive polls that showed increasing usage. Used to
@@ -34,21 +33,19 @@ public struct UsageActivityMonitor: Equatable, Sendable {
 
   public mutating func ingest(_ snapshot: UsageSnapshot, at date: Date) -> UsageActivityState {
     let lifetimeTokens = snapshot.lifetime.tokens.total
-    let lifetimeRequests = snapshot.lifetime.requests.total
     defer {
       lastLifetimeTokens = lifetimeTokens
-      lastLifetimeRequests = lifetimeRequests
     }
 
     if snapshot.syncHealth == .warning {
       return .warning
     }
 
-    guard let previousTokens = lastLifetimeTokens, let previousRequests = lastLifetimeRequests else {
+    guard let previousTokens = lastLifetimeTokens else {
       return state(for: snapshot, at: date)
     }
 
-    if lifetimeTokens > previousTokens || lifetimeRequests > previousRequests {
+    if lifetimeTokens > previousTokens {
       consecutiveIncreases += 1
       // Sustained activity earns progressively longer tail, capped at 2×.
       let scaledDuration = activityDuration + cooldownExtension * min(Double(consecutiveIncreases) / 3.0, 1.0)

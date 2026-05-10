@@ -52,9 +52,32 @@ struct CockpitCodexStatsDataSourceTests {
     // Lifetime is always available regardless of window validation
     #expect(snapshot.lifetime.requests.total == 100)
   }
+
+  @Test("accepts trailing windows relative to cockpit update time")
+  func acceptsTrailingWindowsRelativeToCockpitUpdateTime() async throws {
+    let updatedAt: Int64 = 1_700_000_000_000
+    let now = Date(timeIntervalSince1970: Double(updatedAt + 5_000) / 1_000)
+    let statsURL = try makeFixtureStatsFile(
+      updatedAt: updatedAt,
+      dailySince: updatedAt - 24 * 60 * 60 * 1_000,
+      weeklySince: updatedAt - 7 * 24 * 60 * 60 * 1_000,
+      monthlySince: updatedAt - 30 * 24 * 60 * 60 * 1_000
+    )
+    let dataSource = CockpitCodexStatsDataSource(statsURL: statsURL, now: { now })
+
+    let snapshot = try #require(try await dataSource.readSnapshot())
+
+    #expect(snapshot.week.tokens.total == 2_580)
+    #expect(snapshot.month.tokens.total == 5_020)
+  }
 }
 
-private func makeFixtureStatsFile(dailySince: Int64 = 1_700_000_000_000) throws -> URL {
+private func makeFixtureStatsFile(
+  updatedAt: Int64 = 1_700_000_100_000,
+  dailySince: Int64 = 1_700_000_000_000,
+  weeklySince: Int64 = 1_699_500_000_000,
+  monthlySince: Int64 = 1_697_500_000_000
+) throws -> URL {
   let directory = FileManager.default.temporaryDirectory
     .appendingPathComponent(UUID().uuidString, isDirectory: true)
   try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -63,10 +86,10 @@ private func makeFixtureStatsFile(dailySince: Int64 = 1_700_000_000_000) throws 
   let json = """
   {
     "since": 1700000000000,
-    "updatedAt": 1700000100000,
+    "updatedAt": \(updatedAt),
     "daily": {
       "since": \(dailySince),
-      "updatedAt": 1700000100000,
+      "updatedAt": \(updatedAt),
       "totals": {
         "requestCount": 10,
         "successCount": 9,
@@ -80,7 +103,8 @@ private func makeFixtureStatsFile(dailySince: Int64 = 1_700_000_000_000) throws 
       }
     },
     "weekly": {
-      "since": 1699500000000,
+      "since": \(weeklySince),
+      "updatedAt": \(updatedAt),
       "totals": {
         "requestCount": 20,
         "successCount": 18,
@@ -94,7 +118,8 @@ private func makeFixtureStatsFile(dailySince: Int64 = 1_700_000_000_000) throws 
       }
     },
     "monthly": {
-      "since": 1697500000000,
+      "since": \(monthlySince),
+      "updatedAt": \(updatedAt),
       "totals": {
         "requestCount": 40,
         "successCount": 37,

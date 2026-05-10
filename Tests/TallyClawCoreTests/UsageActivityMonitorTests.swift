@@ -73,12 +73,24 @@ struct UsageActivityMonitorTests {
     )
     #expect(stateAfterPause == .active)
   }
+
+  @Test("stays idle when only request count increases")
+  func staysIdleWhenOnlyRequestCountIncreases() {
+    var monitor = UsageActivityMonitor(activityDuration: 8, cooldownExtension: 8)
+    let now = Date(timeIntervalSince1970: 100)
+
+    _ = monitor.ingest(snapshot(tokens: 1_000, requests: 10), at: now)
+    let state = monitor.ingest(snapshot(tokens: 1_000, requests: 11), at: now.addingTimeInterval(5))
+
+    #expect(state == .idle)
+  }
 }
 
-private func snapshot(tokens: Int64, health: SyncHealth = .syncing) -> UsageSnapshot {
+private func snapshot(tokens: Int64, requests: Int? = nil, health: SyncHealth = .syncing) -> UsageSnapshot {
+  let requestCount = requests ?? Int(tokens / 100)
   let stats = UsagePeriodStats(
     tokens: TokenBreakdown(input: tokens, output: 0),
-    requests: RequestStats(total: Int(tokens / 100), succeeded: Int(tokens / 100), failed: 0)
+    requests: RequestStats(total: requestCount, succeeded: requestCount, failed: 0)
   )
 
   return UsageSnapshot(

@@ -10,13 +10,15 @@ struct TallyClawApp: App {
   var body: some Scene {
     Window("TallyClaw", id: "main") {
       TallyClawHostView(floatingPreferences: floatingPreferences)
-        .frame(width: 308, height: 420, alignment: .top)
         .background(Color.clear)
         .containerBackground(.clear, for: .window)
     }
     .windowStyle(.hiddenTitleBar)
     .windowResizability(.contentSize)
-    .defaultSize(width: 308, height: 420)
+    .defaultSize(
+      width: FloatingWindowDragGeometry.collapsedWindowSize.width,
+      height: FloatingWindowDragGeometry.collapsedWindowSize.height
+    )
 
     Settings {
       TallyClawSettingsView(

@@ -84,31 +84,64 @@ public actor SQLiteLedgerStore: LedgerStore {
     let database = try SQLiteLedgerDatabase.open(at: databaseURL)
     defer { database.close() }
 
+    let recordedAt = now()
+    let todayKey = periodKey(for: .today, at: recordedAt)
+    let weekKey = periodKey(for: .week, at: recordedAt)
+    let monthKey = periodKey(for: .month, at: recordedAt)
+    let lifetimeKey = PeriodKind.lifetime.staticKey
+    let previousLifetime = try database.storedStats(
+      sourceID: sourceID,
+      period: .lifetime,
+      key: lifetimeKey
+    )?.periodStats
+    let lifetimeDelta = previousLifetime.map { UsagePeriodStats.positiveDelta(from: $0, to: snapshot.lifetime) }
+
     try database.upsert(
       sourceID: sourceID,
       period: .today,
-      key: periodKey(for: .today, at: snapshot.observedAt),
-      stats: snapshot.today,
+      key: todayKey,
+      stats: try currentWindowStats(
+        incoming: snapshot.today,
+        sourceID: sourceID,
+        period: .today,
+        key: todayKey,
+        lifetimeDelta: lifetimeDelta,
+        database: database
+      ),
       observedAt: snapshot.observedAt
     )
     try database.upsert(
       sourceID: sourceID,
       period: .week,
-      key: periodKey(for: .week, at: snapshot.observedAt),
-      stats: snapshot.week,
+      key: weekKey,
+      stats: try currentWindowStats(
+        incoming: snapshot.week,
+        sourceID: sourceID,
+        period: .week,
+        key: weekKey,
+        lifetimeDelta: lifetimeDelta,
+        database: database
+      ),
       observedAt: snapshot.observedAt
     )
     try database.upsert(
       sourceID: sourceID,
       period: .month,
-      key: periodKey(for: .month, at: snapshot.observedAt),
-      stats: snapshot.month,
+      key: monthKey,
+      stats: try currentWindowStats(
+        incoming: snapshot.month,
+        sourceID: sourceID,
+        period: .month,
+        key: monthKey,
+        lifetimeDelta: lifetimeDelta,
+        database: database
+      ),
       observedAt: snapshot.observedAt
     )
     try database.upsert(
       sourceID: sourceID,
       period: .lifetime,
-      key: PeriodKind.lifetime.staticKey,
+      key: lifetimeKey,
       stats: snapshot.lifetime,
       observedAt: snapshot.observedAt
     )
@@ -139,6 +172,25 @@ public actor SQLiteLedgerStore: LedgerStore {
     case .lifetime:
       return period.staticKey
     }
+  }
+
+  private func currentWindowStats(
+    incoming: UsagePeriodStats,
+    sourceID: String,
+    period: PeriodKind,
+    key: String,
+    lifetimeDelta: UsagePeriodStats?,
+    database: SQLiteLedgerDatabase
+  ) throws -> UsagePeriodStats {
+    guard sourceID == "cockpit-codex-stats", incoming.isEmptyForLedger else {
+      return incoming
+    }
+
+    let existing = try database.storedStats(sourceID: sourceID, period: period, key: key)?.periodStats
+    guard let lifetimeDelta, !lifetimeDelta.isEmptyForLedger else {
+      return existing ?? incoming
+    }
+    return (existing ?? .empty).adding(lifetimeDelta)
   }
 }
 
@@ -221,7 +273,8 @@ private final class SQLiteLedgerDatabase {
     observedAt: Date
   ) throws {
     let incoming = StoredPeriodStats(sourceID: sourceID, period: period.rawValue, key: key, stats: stats, observedAt: observedAt)
-    if let existing = try storedStats(sourceID: sourceID, period: period, key: key),
+    if period == .lifetime,
+       let existing = try storedStats(sourceID: sourceID, period: period, key: key),
        existing.usageScore > incoming.usageScore {
       return
     }
@@ -414,7 +467,7 @@ private final class SQLiteLedgerDatabase {
     return statuses
   }
 
-  private func storedStats(sourceID: String, period: PeriodKind, key: String) throws -> StoredPeriodStats? {
+  func storedStats(sourceID: String, period: PeriodKind, key: String) throws -> StoredPeriodStats? {
     let sql = """
       SELECT observed_at_ms, input_tokens, output_tokens, cache_tokens, thinking_tokens,
         request_total, request_succeeded, request_failed, average_latency_ms
@@ -527,6 +580,70 @@ private struct StoredPeriodStats {
 
   var usageScore: Int64 {
     input + output + cache + thinking + Int64(totalRequests)
+  }
+
+  var periodStats: UsagePeriodStats {
+    UsagePeriodStats(
+      tokens: TokenBreakdown(input: input, output: output, cache: cache, thinking: thinking),
+      requests: RequestStats(
+        total: totalRequests,
+        succeeded: succeededRequests,
+        failed: failedRequests,
+        averageLatencyMilliseconds: averageLatencyMilliseconds
+      )
+    )
+  }
+}
+
+private extension UsagePeriodStats {
+  var isEmptyForLedger: Bool {
+    tokens.input == 0 &&
+      tokens.output == 0 &&
+      tokens.cache == 0 &&
+      tokens.thinking == 0 &&
+      requests.total == 0 &&
+      requests.succeeded == 0 &&
+      requests.failed == 0
+  }
+
+  func adding(_ other: UsagePeriodStats) -> UsagePeriodStats {
+    UsagePeriodStats(
+      tokens: TokenBreakdown(
+        input: tokens.input + other.tokens.input,
+        output: tokens.output + other.tokens.output,
+        cache: tokens.cache + other.tokens.cache,
+        thinking: tokens.thinking + other.tokens.thinking
+      ),
+      requests: RequestStats(
+        total: requests.total + other.requests.total,
+        succeeded: requests.succeeded + other.requests.succeeded,
+        failed: requests.failed + other.requests.failed,
+        averageLatencyMilliseconds: weightedLatency(lhs: requests, rhs: other.requests)
+      )
+    )
+  }
+
+  static func positiveDelta(from previous: UsagePeriodStats, to current: UsagePeriodStats) -> UsagePeriodStats {
+    UsagePeriodStats(
+      tokens: TokenBreakdown(
+        input: max(0, current.tokens.input - previous.tokens.input),
+        output: max(0, current.tokens.output - previous.tokens.output),
+        cache: max(0, current.tokens.cache - previous.tokens.cache),
+        thinking: max(0, current.tokens.thinking - previous.tokens.thinking)
+      ),
+      requests: RequestStats(
+        total: max(0, current.requests.total - previous.requests.total),
+        succeeded: max(0, current.requests.succeeded - previous.requests.succeeded),
+        failed: max(0, current.requests.failed - previous.requests.failed),
+        averageLatencyMilliseconds: current.requests.averageLatencyMilliseconds
+      )
+    )
+  }
+
+  private func weightedLatency(lhs: RequestStats, rhs: RequestStats) -> Int {
+    let total = lhs.total + rhs.total
+    guard total > 0 else { return 0 }
+    return ((lhs.total * lhs.averageLatencyMilliseconds) + (rhs.total * rhs.averageLatencyMilliseconds)) / total
   }
 }
 

@@ -32,22 +32,23 @@ public struct TallyClawRootView: View {
       ZStack(alignment: .top) {
         petStage(motion: motion, state: visualState)
 
-        if isExpanded {
-          ExpandedDataStrip(snapshot: snapshot, color: palette.main)
-            .offset(y: 96)
-            .transition(.opacity.combined(with: .scale(scale: 0.98, anchor: .top)))
-        }
+        ExpandedDataStrip(snapshot: snapshot, color: palette.main)
+          .offset(y: 96)
+          .opacity(isExpanded ? 1 : 0)
+          .allowsHitTesting(isExpanded)
+          .accessibilityHidden(!isExpanded)
       }
-      .frame(width: 292, height: 388)
+      .frame(width: FloatingWindowDragGeometry.rootContentWidth, height: windowSize.height, alignment: .top)
       .padding(.horizontal, 8)
-      .padding(.vertical, 8)
       .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
       .coordinateSpace(name: "floatingRoot")
-      .background(FloatingWindowConfigurator(windowState: windowState, preferences: preferences))
-      .onAppear {
-        lastLifetimeTokens = snapshot.lifetime.tokens.total
-        _ = activityMonitor.ingest(snapshot, at: Date())
-      }
+      .background(
+        FloatingWindowConfigurator(
+          windowState: windowState,
+          preferences: preferences,
+          desiredSize: windowSize
+        )
+      )
       .onChange(of: snapshot.lifetime.tokens.total) { _, newValue in
         guard let previous = lastLifetimeTokens else {
           lastLifetimeTokens = newValue
@@ -99,7 +100,7 @@ public struct TallyClawRootView: View {
       if isHovered && !isExpanded {
         HoverDataLeaf(snapshot: snapshot, color: palette.main)
           .offset(x: hoverSide == .right ? 68 : -68, y: -7)
-          .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: hoverSide == .right ? .leading : .trailing)))
+          .transition(.opacity)
       }
     }
     .frame(width: 170, height: 94)
@@ -118,7 +119,7 @@ public struct TallyClawRootView: View {
       }
     }
     .onTapGesture {
-      withAnimation(.spring(response: 0.3, dampingFraction: 0.86)) {
+      withAnimation(.easeInOut(duration: 0.24)) {
         isExpanded.toggle()
       }
     }
@@ -126,12 +127,18 @@ public struct TallyClawRootView: View {
       DragGesture(minimumDistance: 1)
         .onChanged { _ in
           windowState.beginDragIfNeeded()
-          windowState.updateDrag(petAnchor: petAnchorInWindow())
+          windowState.updateDrag(petFrameInWindow: petDragFrameInWindow())
         }
         .onEnded { _ in
           windowState.endDrag(saveFrame: preferences.saveFrame)
         }
     )
+  }
+
+  private var windowSize: CGSize {
+    isExpanded
+      ? FloatingWindowDragGeometry.expandedWindowSize
+      : FloatingWindowDragGeometry.collapsedWindowSize
   }
 
   private func hoverSide() -> HoverSide {
@@ -147,10 +154,22 @@ public struct TallyClawRootView: View {
   }
 
   private func petAnchorInWindow() -> CGPoint {
-    if petStageFrame != .zero {
-      return CGPoint(x: petStageFrame.midX, y: petStageFrame.midY)
+    let petFrame = petFrameInWindow()
+    if petFrame != .zero {
+      return CGPoint(x: petFrame.midX, y: petFrame.midY)
     }
     return CGPoint(x: windowState.frame.width / 2, y: windowState.frame.height / 2)
+  }
+
+  private func petFrameInWindow() -> CGRect {
+    if petStageFrame != .zero {
+      return petStageFrame
+    }
+    return FloatingWindowDragGeometry.defaultPetStageFrame(windowSize: windowState.frame.size)
+  }
+
+  private func petDragFrameInWindow() -> CGRect {
+    FloatingWindowDragGeometry.petDragFrame(stageFrame: petFrameInWindow())
   }
 
   private func emitTokenPulse(count: Int = 3) {
@@ -226,6 +245,9 @@ private struct PetMotion {
   let scale: CGFloat
   let coreScale: CGFloat
   let energyPhase: CGFloat
+  let eyeBlinkScale: CGFloat
+  let earRotationLeft: CGFloat
+  let earRotationRight: CGFloat
 
   init(date: Date, state: PetVisualState, isPressed: Bool) {
     let time = date.timeIntervalSinceReferenceDate
@@ -258,6 +280,38 @@ private struct PetMotion {
 
     if isPressed {
       nextScale *= 1.01
+    }
+
+    // Eye Blink Logic (smooth and reliable)
+    let blinkPhase = time.truncatingRemainder(dividingBy: 3.8)
+    if state == .idle && blinkPhase < 0.12 {
+      let progress = blinkPhase / 0.12
+      // sin(progress * pi) goes 0 -> 1 -> 0
+      let intensity = sin(progress * .pi)
+      eyeBlinkScale = CGFloat(max(0.1, 1.0 - intensity * 1.5))
+    } else {
+      eyeBlinkScale = 1.0
+    }
+
+    // Ear Twitch Logic (rapid, smooth flicking)
+    // Left Ear: 3 rapid outward flicks every 4.7s
+    let leftPhase = time.truncatingRemainder(dividingBy: 4.7)
+    if leftPhase < 0.15 {
+      let progress = leftPhase / 0.15
+      // abs(sin) guarantees outward only; 3*pi means 3 flicks
+      earRotationLeft = CGFloat(-abs(sin(progress * .pi * 3)) * 22)
+    } else {
+      earRotationLeft = 0
+    }
+
+    // Right Ear: 2 slightly slower outward flicks every 5.3s
+    let rightPhase = time.truncatingRemainder(dividingBy: 5.3)
+    if rightPhase < 0.2 {
+      let progress = rightPhase / 0.2
+      // right ear outward is positive rotation
+      earRotationRight = CGFloat(abs(sin(progress * .pi * 2)) * 22)
+    } else {
+      earRotationRight = 0
     }
 
     x = nextX
@@ -309,16 +363,16 @@ private struct TallyClawPetBody: View {
 
   private var ears: some View {
     ZStack {
-      Triangle()
+      PetEar()
         .fill(palette.stroke)
-        .frame(width: 7.5, height: 7)
-        .rotationEffect(.degrees(-8))
-        .offset(x: -10.5, y: -16.5)
-      Triangle()
+        .frame(width: 9, height: 9)
+        .rotationEffect(.degrees(-10 + motion.earRotationLeft), anchor: .bottomTrailing)
+        .offset(x: -12, y: -16)
+      PetEar()
         .fill(palette.stroke)
-        .frame(width: 7.5, height: 7)
-        .rotationEffect(.degrees(8))
-        .offset(x: 10.5, y: -16.5)
+        .frame(width: 9, height: 9)
+        .rotationEffect(.degrees(10 + motion.earRotationRight), anchor: .bottomLeading)
+        .offset(x: 12, y: -16)
     }
   }
 
@@ -335,8 +389,8 @@ private struct TallyClawPetBody: View {
 
   private var eyes: some View {
     HStack(spacing: 10) {
-      EyeView(state: state, isHovered: isHovered, side: .left, color: palette.main)
-      EyeView(state: state, isHovered: isHovered, side: .right, color: palette.main)
+      EyeView(state: state, isHovered: isHovered, motion: motion, side: .left, color: palette.main)
+      EyeView(state: state, isHovered: isHovered, motion: motion, side: .right, color: palette.main)
     }
     .offset(y: -3)
     .shadow(color: palette.glow, radius: 3)
@@ -344,15 +398,22 @@ private struct TallyClawPetBody: View {
 
   private var core: some View {
     ZStack {
-      Circle()
-        .stroke(palette.main.opacity(state == .highActivity ? 0.58 : 0.25), lineWidth: 0.8)
-        .frame(width: 9, height: 9)
-        .scaleEffect(state == .highActivity || pulseActive ? motion.coreScale : 0.82)
+      if state == .highActivity {
+        Capsule()
+          .fill(palette.main)
+          .frame(width: 11 + sin(motion.energyPhase * .pi * 2) * 5, height: 3 + cos(motion.energyPhase * .pi * 4) * 1.5)
+          .shadow(color: palette.glow, radius: 5)
+      } else {
+        Circle()
+          .stroke(palette.main.opacity(0.25), lineWidth: 0.8)
+          .frame(width: 9, height: 9)
+          .scaleEffect(pulseActive ? motion.coreScale : 0.82)
 
-      Circle()
-        .fill(palette.main)
-        .frame(width: 3.5, height: 3.5)
-        .scaleEffect(pulseActive ? 1.35 : motion.coreScale)
+        Circle()
+          .fill(palette.main)
+          .frame(width: 3.5, height: 3.5)
+          .scaleEffect(pulseActive ? 1.35 : motion.coreScale)
+      }
     }
     .offset(y: 12.5)
     .shadow(color: palette.glow, radius: 3.5)
@@ -394,6 +455,7 @@ private enum EyeSide {
 private struct EyeView: View {
   let state: PetVisualState
   let isHovered: Bool
+  let motion: PetMotion
   let side: EyeSide
   let color: Color
 
@@ -417,6 +479,7 @@ private struct EyeView: View {
         Capsule()
           .fill(color)
           .frame(width: 4.5, height: 1.5)
+          .scaleEffect(y: motion.eyeBlinkScale)
       }
     }
   }
@@ -432,7 +495,7 @@ private struct HoverDataLeaf: View {
         .fill(color)
         .frame(width: 5, height: 5)
         .shadow(color: color.opacity(0.8), radius: 5)
-      Text("\(snapshot.today.tokens.total.formattedCompact.lowercased()) tk")
+      Text("\(snapshot.today.tokens.total.formattedCompact.lowercased()) tokens")
         .font(.system(size: 10.5, weight: .regular, design: .monospaced))
         .foregroundStyle(color)
         .fixedSize(horizontal: true, vertical: false)
@@ -555,7 +618,7 @@ private struct TokenParticleView: View {
   @State private var isFloating = false
 
   var body: some View {
-    Text("+tk")
+    Text("+tokens")
       .font(.system(size: 8, weight: .regular, design: .monospaced))
       .foregroundStyle(color)
       .shadow(color: color.opacity(0.8), radius: 3)
@@ -570,12 +633,18 @@ private struct TokenParticleView: View {
   }
 }
 
-private struct Triangle: Shape {
+private struct PetEar: Shape {
   func path(in rect: CGRect) -> Path {
     var path = Path()
-    path.move(to: CGPoint(x: rect.midX, y: rect.minY))
-    path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
-    path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.move(to: CGPoint(x: rect.minX, y: rect.maxY))
+    path.addQuadCurve(
+      to: CGPoint(x: rect.midX, y: rect.minY),
+      control: CGPoint(x: rect.minX + rect.width * 0.2, y: rect.minY + rect.height * 0.4)
+    )
+    path.addQuadCurve(
+      to: CGPoint(x: rect.maxX, y: rect.maxY),
+      control: CGPoint(x: rect.maxX - rect.width * 0.2, y: rect.minY + rect.height * 0.4)
+    )
     path.closeSubpath()
     return path
   }

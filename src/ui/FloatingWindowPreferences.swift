@@ -32,18 +32,17 @@ public final class FloatingWindowPreferences: ObservableObject {
       defaults.object(forKey: Keys.frameY) != nil
     else { return nil }
 
-    let width = defaults.object(forKey: Keys.frameWidth) == nil
-      ? defaultSize.width
-      : defaults.double(forKey: Keys.frameWidth)
-    let height = defaults.object(forKey: Keys.frameHeight) == nil
+    let storedY = defaults.double(forKey: Keys.frameY)
+    let storedHeight = defaults.object(forKey: Keys.frameHeight) == nil
       ? defaultSize.height
-      : defaults.double(forKey: Keys.frameHeight)
+      : max(defaults.double(forKey: Keys.frameHeight), 1)
+    let restoredY = storedY + storedHeight - defaultSize.height
 
     let frame = CGRect(
       x: defaults.double(forKey: Keys.frameX),
-      y: defaults.double(forKey: Keys.frameY),
-      width: max(width, 1),
-      height: max(height, 1)
+      y: restoredY,
+      width: defaultSize.width,
+      height: defaultSize.height
     )
 
     return isUsable(frame) ? frame : nil

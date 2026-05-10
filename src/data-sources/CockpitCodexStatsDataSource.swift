@@ -36,23 +36,29 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
     // timestamp against the calendar boundary TallyClaw expects, and discard
     // windows whose `since` falls before the expected boundary.
     let todayStart = calendar.startOfDay(for: currentTime)
-    let trailing7DaysStart = currentTime.addingTimeInterval(-7 * 24 * 60 * 60)
-    let trailing30DaysStart = currentTime.addingTimeInterval(-30 * 24 * 60 * 60)
+    let statsUpdatedAt = file.updatedAt.map(Self.dateFromMilliseconds) ?? observedAt
+    let weeklyUpdatedAt = file.weekly?.updatedAt.map(Self.dateFromMilliseconds) ?? statsUpdatedAt
+    let monthlyUpdatedAt = file.monthly?.updatedAt.map(Self.dateFromMilliseconds) ?? statsUpdatedAt
+    let trailing7DaysStart = weeklyUpdatedAt.addingTimeInterval(-7 * 24 * 60 * 60)
+    let trailing30DaysStart = monthlyUpdatedAt.addingTimeInterval(-30 * 24 * 60 * 60)
 
     let todayStats = validatedPeriodStats(
       window: file.daily,
       expectedStart: todayStart,
-      windowLabel: "daily"
+      windowLabel: "daily",
+      tolerance: 0
     )
     let weekStats = validatedPeriodStats(
       window: file.weekly,
       expectedStart: trailing7DaysStart,
-      windowLabel: "weekly"
+      windowLabel: "weekly",
+      tolerance: 60
     )
     let monthStats = validatedPeriodStats(
       window: file.monthly,
       expectedStart: trailing30DaysStart,
-      windowLabel: "monthly"
+      windowLabel: "monthly",
+      tolerance: 60
     )
 
     return UsageSnapshot(
@@ -73,7 +79,8 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
   private func validatedPeriodStats(
     window: CockpitUsageWindow?,
     expectedStart: Date,
-    windowLabel: String
+    windowLabel: String,
+    tolerance: TimeInterval
   ) -> UsagePeriodStats {
     guard let window else { return .empty }
     guard let since = window.since else {
@@ -81,13 +88,17 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
       return window.totals.periodStats
     }
     let windowStart = Date(timeIntervalSince1970: Double(since) / 1_000)
-    if windowStart >= expectedStart {
+    if windowStart.addingTimeInterval(tolerance) >= expectedStart {
       return window.totals.periodStats
     }
     // The cockpit window started before our expected boundary, meaning its
     // totals include data from outside the calendar period. Return empty
     // rather than recording inflated numbers.
     return .empty
+  }
+
+  private static func dateFromMilliseconds(_ milliseconds: Int64) -> Date {
+    Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
   }
 }
 

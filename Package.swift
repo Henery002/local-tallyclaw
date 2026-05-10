@@ -59,6 +59,11 @@ let package = Package(
       name: "TallyClawLedgerTests",
       dependencies: ["TallyClawLedger"],
       path: "Tests/TallyClawLedgerTests"
+    ),
+    .testTarget(
+      name: "TallyClawUITests",
+      dependencies: ["TallyClawUI"],
+      path: "Tests/TallyClawUITests"
     )
   ]
 )

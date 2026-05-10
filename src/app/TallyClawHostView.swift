@@ -6,7 +6,15 @@ import TallyClawUI
 
 struct TallyClawHostView: View {
   @ObservedObject private var floatingPreferences: FloatingWindowPreferences
-  @State private var snapshot = UsageSnapshot.preview
+  @State private var snapshot = UsageSnapshot(
+    today: .empty,
+    week: .empty,
+    month: .empty,
+    lifetime: .empty,
+    topSources: [],
+    syncHealth: .syncing,
+    observedAt: Date(timeIntervalSince1970: 0)
+  )
   @State private var ledgerInitializationFailed = false
 
   private let sources: [any UsageDataSource] = [
