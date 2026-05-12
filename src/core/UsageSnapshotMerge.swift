@@ -14,6 +14,8 @@ public extension UsageSnapshot {
       )
     }
 
+    let lifetimeStart = preferredLifetimeStart(snapshots)
+
     return UsageSnapshot(
       today: UsagePeriodStats.merged(snapshots.map(\.today)),
       week: UsagePeriodStats.merged(snapshots.map(\.week)),
@@ -22,8 +24,24 @@ public extension UsageSnapshot {
       topSources: mergeSourceShares(snapshots.flatMap(\.topSources)),
       syncHealth: snapshots.contains { $0.syncHealth == .warning } ? .warning : .idle,
       observedAt: snapshots.map(\.observedAt).max() ?? first.observedAt,
-      sourceStatuses: snapshots.flatMap(\.sourceStatuses)
+      lifetimeStartedAt: lifetimeStart?.date ?? UsageSnapshot.unknownLifetimeStartDate,
+      lifetimeStartedAtLabel: lifetimeStart?.label,
+      sourceStatuses: snapshots.flatMap(\.sourceStatuses),
+      hourlyTokenTrend: mergeHourlyTrend(snapshots.map(\.hourlyTokenTrend))
     )
+  }
+
+  private static func preferredLifetimeStart(_ snapshots: [UsageSnapshot]) -> (date: Date, label: String?)? {
+    let validSnapshots = snapshots.filter { $0.lifetimeStartedAt > UsageSnapshot.unknownLifetimeStartDate }
+    if let cockpit = validSnapshots
+      .filter({ $0.lifetimeStartedAtLabel == "cockpit" })
+      .min(by: { $0.lifetimeStartedAt < $1.lifetimeStartedAt }) {
+      return (cockpit.lifetimeStartedAt, cockpit.lifetimeStartedAtLabel)
+    }
+
+    return validSnapshots
+      .min(by: { $0.lifetimeStartedAt < $1.lifetimeStartedAt })
+      .map { ($0.lifetimeStartedAt, $0.lifetimeStartedAtLabel) }
   }
 
   private static func mergeSourceShares(_ shares: [SourceShare]) -> [SourceShare] {
@@ -31,6 +49,19 @@ public extension UsageSnapshot {
     guard !names.isEmpty else { return [] }
     let percent = max(1, 100 / names.count)
     return names.prefix(3).map { SourceShare(name: $0, percent: percent) }
+  }
+
+  private static func mergeHourlyTrend(_ trends: [[HourlyTokenUsage]]) -> [HourlyTokenUsage] {
+    let flattened = trends.flatMap { $0 }
+    let keys = Array(Set(flattened.map(\.bucketKey))).sorted()
+    return keys.map { key in
+      let matching = flattened.filter { $0.bucketKey == key }
+      return HourlyTokenUsage(
+        bucketKey: key,
+        label: matching.first?.label ?? key,
+        tokens: matching.reduce(Int64(0)) { $0 + $1.tokens }
+      )
+    }
   }
 }
 

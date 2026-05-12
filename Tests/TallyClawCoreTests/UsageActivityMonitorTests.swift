@@ -84,9 +84,60 @@ struct UsageActivityMonitorTests {
 
     #expect(state == .idle)
   }
+
+  @Test("classifies recent token increases into visual intensity levels")
+  func classifiesRecentTokenIncreasesIntoVisualIntensityLevels() {
+    var monitor = UsageActivityMonitor(activityDuration: 8, cooldownExtension: 8)
+    let now = Date(timeIntervalSince1970: 100)
+
+    _ = monitor.ingest(snapshot(tokens: 1_000), at: now)
+    #expect(monitor.intensity(for: snapshot(tokens: 1_000), at: now.addingTimeInterval(1)) == .none)
+
+    _ = monitor.ingest(snapshot(tokens: 2_000), at: now.addingTimeInterval(2))
+    #expect(monitor.intensity(for: snapshot(tokens: 2_000), at: now.addingTimeInterval(3)) == .low)
+
+    _ = monitor.ingest(snapshot(tokens: 52_000), at: now.addingTimeInterval(4))
+    #expect(monitor.intensity(for: snapshot(tokens: 52_000), at: now.addingTimeInterval(5)) == .medium)
+
+    _ = monitor.ingest(snapshot(tokens: 252_000), at: now.addingTimeInterval(6))
+    #expect(monitor.intensity(for: snapshot(tokens: 252_000), at: now.addingTimeInterval(7)) == .high)
+  }
+
+  @Test("visual intensity expires with the active window")
+  func visualIntensityExpiresWithActiveWindow() {
+    var monitor = UsageActivityMonitor(activityDuration: 8, cooldownExtension: 0)
+    let now = Date(timeIntervalSince1970: 100)
+
+    _ = monitor.ingest(snapshot(tokens: 1_000), at: now)
+    _ = monitor.ingest(snapshot(tokens: 201_000), at: now.addingTimeInterval(1))
+
+    #expect(monitor.intensity(for: snapshot(tokens: 201_000), at: now.addingTimeInterval(2)) == .high)
+    #expect(monitor.intensity(for: snapshot(tokens: 201_000), at: now.addingTimeInterval(10)) == .none)
+  }
+
+  @Test("remembers cockpit as the active source while recent usage is active")
+  func remembersCockpitActiveSource() {
+    var monitor = UsageActivityMonitor(activityDuration: 8, cooldownExtension: 0)
+    let now = Date(timeIntervalSince1970: 100)
+
+    _ = monitor.ingest(snapshot(tokens: 1_000, topSource: "cockpit-codex-stats"), at: now)
+    _ = monitor.ingest(snapshot(tokens: 2_000, topSource: "cockpit-codex-stats"), at: now.addingTimeInterval(1))
+
+    #expect(
+      monitor.activeSource(for: snapshot(tokens: 2_000, topSource: "cockpit-codex-stats"), at: now.addingTimeInterval(2)) == .cockpit
+    )
+    #expect(
+      monitor.activeSource(for: snapshot(tokens: 2_000, topSource: "cockpit-codex-stats"), at: now.addingTimeInterval(10)) == .none
+    )
+  }
 }
 
-private func snapshot(tokens: Int64, requests: Int? = nil, health: SyncHealth = .syncing) -> UsageSnapshot {
+private func snapshot(
+  tokens: Int64,
+  requests: Int? = nil,
+  health: SyncHealth = .syncing,
+  topSource: String? = nil
+) -> UsageSnapshot {
   let requestCount = requests ?? Int(tokens / 100)
   let stats = UsagePeriodStats(
     tokens: TokenBreakdown(input: tokens, output: 0),
@@ -98,7 +149,7 @@ private func snapshot(tokens: Int64, requests: Int? = nil, health: SyncHealth = 
     week: stats,
     month: stats,
     lifetime: stats,
-    topSources: [],
+    topSources: topSource.map { [SourceShare(name: $0, percent: 100)] } ?? [],
     syncHealth: health,
     observedAt: Date(timeIntervalSince1970: 100)
   )

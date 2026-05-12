@@ -6,6 +6,54 @@ public enum UsageActivityState: Equatable, Sendable {
   case warning
 }
 
+public enum UsageActivityIntensity: Equatable, Sendable {
+  case none
+  case low
+  case medium
+  case high
+
+  public init(tokenDelta: Int64) {
+    if tokenDelta >= 120_000 {
+      self = .high
+    } else if tokenDelta >= 20_000 {
+      self = .medium
+    } else if tokenDelta > 0 {
+      self = .low
+    } else {
+      self = .none
+    }
+  }
+}
+
+public enum UsageActivitySource: Equatable, Sendable {
+  case none
+  case cockpit
+  case openClaw
+  case gateway
+  case hermes
+  case other(String)
+
+  public init(sourceName: String?) {
+    guard let sourceName, !sourceName.isEmpty else {
+      self = .none
+      return
+    }
+
+    switch sourceName {
+    case "cockpit", "cockpit-codex-stats":
+      self = .cockpit
+    case "openclaw":
+      self = .openClaw
+    case "local-ai-gateway", "gateway":
+      self = .gateway
+    case "hermes":
+      self = .hermes
+    default:
+      self = .other(sourceName)
+    }
+  }
+}
+
 public struct UsageActivityMonitor: Equatable, Sendable {
   /// How long the pet remains in 'active' state after the last detected
   /// token / request increase. Must be substantially longer than the
@@ -20,6 +68,8 @@ public struct UsageActivityMonitor: Equatable, Sendable {
 
   private var lastLifetimeTokens: Int64?
   private var activeUntil: Date?
+  private var activeIntensity: UsageActivityIntensity = .none
+  private var activeSource: UsageActivitySource = .none
 
   /// Number of consecutive polls that showed increasing usage. Used to
   /// scale the active window: sustained activity earns a longer tail so
@@ -46,6 +96,8 @@ public struct UsageActivityMonitor: Equatable, Sendable {
     }
 
     if lifetimeTokens > previousTokens {
+      activeIntensity = UsageActivityIntensity(tokenDelta: lifetimeTokens - previousTokens)
+      activeSource = UsageActivitySource(sourceName: snapshot.topSources.first?.name)
       consecutiveIncreases += 1
       // Sustained activity earns progressively longer tail, capped at 2×.
       let scaledDuration = activityDuration + cooldownExtension * min(Double(consecutiveIncreases) / 3.0, 1.0)
@@ -61,6 +113,26 @@ public struct UsageActivityMonitor: Equatable, Sendable {
     }
 
     return state(for: snapshot, at: date)
+  }
+
+  public func activeSource(for snapshot: UsageSnapshot, at date: Date) -> UsageActivitySource {
+    guard snapshot.syncHealth != .warning else {
+      return .none
+    }
+    guard state(for: snapshot, at: date) == .active else {
+      return .none
+    }
+    return activeSource
+  }
+
+  public func intensity(for snapshot: UsageSnapshot, at date: Date) -> UsageActivityIntensity {
+    guard snapshot.syncHealth != .warning else {
+      return .none
+    }
+    guard state(for: snapshot, at: date) == .active else {
+      return .none
+    }
+    return activeIntensity
   }
 
   public func state(for snapshot: UsageSnapshot, at date: Date) -> UsageActivityState {

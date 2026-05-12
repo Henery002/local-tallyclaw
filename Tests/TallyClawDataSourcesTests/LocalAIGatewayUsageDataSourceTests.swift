@@ -25,9 +25,67 @@ struct LocalAIGatewayUsageDataSourceTests {
     #expect(snapshot.week.requests.total == 3)
     #expect(snapshot.month.requests.total == 4)
     #expect(snapshot.lifetime.requests.total == 5)
+    #expect(snapshot.lifetimeStartedAt == Date(timeIntervalSince1970: 1_680_000_000))
     #expect(snapshot.topSources.first?.name == "codex")
     #expect(snapshot.topSources.first?.percent == 100)
     #expect(snapshot.syncHealth == .idle)
+  }
+
+  @Test("reads event-level observations without exposing account identity")
+  func readsEventLevelObservationsWithoutExposingAccountIdentity() async throws {
+    let databaseURL = try makeFixtureDatabase()
+    let dataSource = LocalAIGatewayUsageDataSource(databaseURL: databaseURL)
+
+    let observations = try await dataSource.readObservations(since: nil)
+
+    #expect(observations.count == 5)
+    #expect(observations.first?.sourceID == "local-ai-gateway")
+    #expect(observations.first?.sourceEventID == "a")
+    #expect(observations.first?.sourceName == "codex")
+    #expect(observations.first?.provider == "openai")
+    #expect(observations.first?.model == "gpt-5")
+    #expect(observations.first?.tokens.input == 100)
+    #expect(observations.first?.tokens.output == 50)
+    #expect(observations.first?.tokens.cache == 10)
+    #expect(observations.first?.tokens.thinking == 5)
+    #expect(observations.first?.requests.total == 1)
+    #expect(observations.first?.requests.succeeded == 1)
+    #expect(observations.first?.requests.failed == 0)
+    #expect(observations.allSatisfy { !$0.sourceName.contains("@") })
+    #expect(observations.allSatisfy { !$0.sourceEventID.contains("@") })
+  }
+
+  @Test("reads event-level observations from legacy schema without optional event columns")
+  func readsEventLevelObservationsFromLegacySchemaWithoutOptionalEventColumns() async throws {
+    let databaseURL = try makeLegacyFixtureDatabase()
+    let dataSource = LocalAIGatewayUsageDataSource(databaseURL: databaseURL)
+
+    let observations = try await dataSource.readObservations(since: nil)
+
+    #expect(observations.count == 1)
+    #expect(observations.first?.sourceEventID == "1")
+    #expect(observations.first?.sourceName == "codex")
+    #expect(observations.first?.provider == "openai")
+    #expect(observations.first?.model == "gpt-4-legacy")
+    #expect(observations.first?.tokens.input == 12)
+    #expect(observations.first?.tokens.output == 8)
+    #expect(observations.first?.tokens.cache == 0)
+    #expect(observations.first?.tokens.thinking == 0)
+  }
+
+  @Test("reports missing required schema columns explicitly")
+  func reportsMissingRequiredSchemaColumnsExplicitly() async throws {
+    let databaseURL = try makeBrokenSchemaFixtureDatabase()
+    let dataSource = LocalAIGatewayUsageDataSource(databaseURL: databaseURL)
+
+    do {
+      _ = try await dataSource.readSnapshot()
+      Issue.record("Expected schema mismatch error.")
+    } catch LocalAIGatewayUsageDataSourceError.queryFailed(let message) {
+      #expect(message.contains("missing required columns"))
+      #expect(message.contains("input_tokens"))
+      #expect(message.contains("output_tokens"))
+    }
   }
 }
 
@@ -72,6 +130,64 @@ private func makeFixtureDatabase() throws -> URL {
   (1699827200000, 'gateway', 'anthropic', 'claude', 1, 0, 600, 300, 70, 370, 0, 0, 0, 0, 'c'),
   (1699222400000, 'gateway', 'openai', 'gpt-4', 1, 0, 800, 400, 80, 480, 0, 0, 0, 0, 'd'),
   (1680000000000, 'legacy', 'openai', 'gpt-4', 1, 0, 1000, 500, 90, 590, 0, 0, 0, 0, 'e');
+  """
+
+  try runSQLite(databaseURL: databaseURL, sql: sql)
+  return databaseURL
+}
+
+private func makeLegacyFixtureDatabase() throws -> URL {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let databaseURL = directory.appendingPathComponent("gateway-legacy.db")
+
+  let sql = """
+  CREATE TABLE inference_usage_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    client_tag TEXT,
+    provider_id TEXT NOT NULL,
+    model_alias TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    stream INTEGER NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    input_tokens INTEGER NOT NULL,
+    output_tokens INTEGER NOT NULL,
+    total_tokens INTEGER NOT NULL,
+    cached_tokens INTEGER NOT NULL,
+    reasoning_tokens INTEGER NOT NULL
+  );
+
+  INSERT INTO inference_usage_events (
+    timestamp, client_tag, provider_id, model_alias, ok, stream, latency_ms,
+    input_tokens, output_tokens, total_tokens, cached_tokens, reasoning_tokens
+  ) VALUES
+  (1699999900000, 'codex', 'openai', 'gpt-4-legacy', 1, 1, 200, 12, 8, 20, 0, 0);
+  """
+
+  try runSQLite(databaseURL: databaseURL, sql: sql)
+  return databaseURL
+}
+
+private func makeBrokenSchemaFixtureDatabase() throws -> URL {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let databaseURL = directory.appendingPathComponent("gateway-broken.db")
+
+  let sql = """
+  CREATE TABLE inference_usage_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp INTEGER NOT NULL,
+    provider_id TEXT NOT NULL,
+    model_alias TEXT NOT NULL,
+    ok INTEGER NOT NULL,
+    latency_ms INTEGER NOT NULL,
+    total_tokens INTEGER NOT NULL,
+    cached_tokens INTEGER NOT NULL,
+    reasoning_tokens INTEGER NOT NULL
+  );
   """
 
   try runSQLite(databaseURL: databaseURL, sql: sql)

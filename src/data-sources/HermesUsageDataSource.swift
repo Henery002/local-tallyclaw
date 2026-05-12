@@ -4,7 +4,7 @@ import TallyClawCore
 
 private let hermesSqliteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
-public struct HermesUsageDataSource: UsageDataSource {
+public struct HermesUsageDataSource: UsageObservationDataSource {
   public let id = "hermes-usage"
   public let displayName = "hermes"
   public let accessPolicy = SourceAccessPolicy.default
@@ -35,6 +35,7 @@ public struct HermesUsageDataSource: UsageDataSource {
     guard try database.tableExists("sessions") else {
       return nil
     }
+    try database.requireColumns(HermesSQLiteDatabase.requiredSessionColumns, in: "sessions")
 
     let events = try database.readSessionUsageEvents().filter { !isLocalAIGatewayURL($0.billingBaseURL) && $0.totalTokens > 0 }
     guard !events.isEmpty else {
@@ -51,13 +52,71 @@ public struct HermesUsageDataSource: UsageDataSource {
       lifetime: support.periodStats(for: events, since: nil),
       topSources: support.topSources(for: events, since: support.todayStart),
       syncHealth: .idle,
-      observedAt: observedAt
+      observedAt: observedAt,
+      lifetimeStartedAt: Self.earliestValidEventDate(events),
+      lifetimeStartedAtLabel: "hermes"
     )
+  }
+
+  public func readObservations(since startDate: Date?) async throws -> [UsageObservation] {
+    let databaseURL = rootURL.appendingPathComponent("state.db")
+    guard FileManager.default.fileExists(atPath: databaseURL.path) else {
+      return []
+    }
+
+    let database = try HermesSQLiteDatabase.readOnly(at: databaseURL)
+    defer { database.close() }
+
+    guard try database.tableExists("sessions") else {
+      return []
+    }
+    try database.requireColumns(HermesSQLiteDatabase.requiredSessionColumns, in: "sessions")
+
+    return try database.readSessionUsageEvents()
+      .filter { event in
+        !isLocalAIGatewayURL(event.billingBaseURL) &&
+          event.totalTokens > 0 &&
+          (startDate.map { event.observedAt >= $0 } ?? true)
+      }
+      .sorted {
+        if $0.observedAt == $1.observedAt {
+          return $0.sourceEventID > $1.sourceEventID
+        }
+        return $0.observedAt > $1.observedAt
+      }
+      .map { event in
+        UsageObservation(
+          sourceID: id,
+          sourceEventID: event.sourceEventID,
+          sourceName: event.sessionSource,
+          provider: event.provider,
+          model: event.model,
+          observedAt: event.observedAt,
+          tokens: TokenBreakdown(
+            input: event.inputTokens,
+            output: event.outputTokens,
+            cache: event.cacheTokens,
+            thinking: event.reasoningTokens
+          ),
+          requests: RequestStats(total: event.requestCount, succeeded: event.requestCount, failed: 0)
+        )
+      }
+  }
+
+  private static func earliestValidEventDate(_ events: [HermesSessionUsageEvent]) -> Date {
+    events
+      .map(\.startedAt)
+      .filter { $0 > UsageSnapshot.unknownLifetimeStartDate }
+      .min() ?? UsageSnapshot.unknownLifetimeStartDate
   }
 }
 
 private final class HermesSQLiteDatabase {
   private var handle: OpaquePointer?
+  static let requiredSessionColumns = [
+    "id", "source", "model", "started_at", "ended_at", "billing_provider", "billing_base_url",
+    "input_tokens", "output_tokens", "cache_read_tokens", "reasoning_tokens", "api_call_count"
+  ]
 
   private init(handle: OpaquePointer?) {
     self.handle = handle
@@ -96,9 +155,37 @@ private final class HermesSQLiteDatabase {
     return sqlite3_column_int64(statement, 0) > 0
   }
 
+  func requireColumns(_ columns: [String], in table: String) throws {
+    let missing = try columns.filter { column in
+      try !columnExists(table: table, column: column)
+    }
+    guard missing.isEmpty else {
+      throw HermesUsageDataSourceError.queryFailed(
+        message: "Hermes schema mismatch: sessions missing required columns: \(missing.joined(separator: ", "))"
+      )
+    }
+  }
+
+  private func columnExists(table: String, column: String) throws -> Bool {
+    let statement = try prepare("PRAGMA table_info(\(table));")
+    defer { sqlite3_finalize(statement) }
+
+    while sqlite3_step(statement) == SQLITE_ROW {
+      let existingColumn = sqlite3_column_text(statement, 1).map { String(cString: $0) }
+      if existingColumn == column {
+        return true
+      }
+    }
+    return false
+  }
+
   func readSessionUsageEvents() throws -> [HermesSessionUsageEvent] {
     let sql = """
       SELECT
+        id,
+        source,
+        model,
+        started_at,
         COALESCE(ended_at, started_at),
         billing_provider,
         billing_base_url,
@@ -115,18 +202,27 @@ private final class HermesSQLiteDatabase {
 
     var events: [HermesSessionUsageEvent] = []
     while sqlite3_step(statement) == SQLITE_ROW {
-      let ts = sqlite3_column_double(statement, 0)
-      let provider = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? "unknown"
-      let baseURL = sqlite3_column_text(statement, 2).map { String(cString: $0) }
+      let sourceEventID = sqlite3_column_text(statement, 0).map { String(cString: $0) } ?? "unknown"
+      let sessionSource = sqlite3_column_text(statement, 1).map { String(cString: $0) } ?? "unknown"
+      let model = sqlite3_column_text(statement, 2).map { String(cString: $0) } ?? "unknown"
+      let startedAt = sqlite3_column_double(statement, 3)
+      let observedAt = sqlite3_column_double(statement, 4)
+      let provider = sqlite3_column_text(statement, 5).map { String(cString: $0) } ?? "unknown"
+      let baseURL = sqlite3_column_text(statement, 6).map { String(cString: $0) }
       events.append(
         HermesSessionUsageEvent(
-          observedAt: Date(timeIntervalSince1970: ts),
+          sourceEventID: sourceEventID,
+          startedAt: Date(timeIntervalSince1970: startedAt),
+          observedAt: Date(timeIntervalSince1970: observedAt),
           sourceName: provider,
-          inputTokens: sqlite3_column_int64(statement, 3),
-          outputTokens: sqlite3_column_int64(statement, 4),
-          cacheTokens: sqlite3_column_int64(statement, 5),
-          reasoningTokens: sqlite3_column_int64(statement, 6),
-          requestCount: Int(sqlite3_column_int64(statement, 7)),
+          sessionSource: sessionSource,
+          provider: provider,
+          model: model,
+          inputTokens: sqlite3_column_int64(statement, 7),
+          outputTokens: sqlite3_column_int64(statement, 8),
+          cacheTokens: sqlite3_column_int64(statement, 9),
+          reasoningTokens: sqlite3_column_int64(statement, 10),
+          requestCount: Int(sqlite3_column_int64(statement, 11)),
           billingBaseURL: baseURL
         )
       )
@@ -149,8 +245,13 @@ private final class HermesSQLiteDatabase {
 }
 
 private struct HermesSessionUsageEvent: UsageEventLike {
+  let sourceEventID: String
+  let startedAt: Date
   let observedAt: Date
   let sourceName: String
+  let sessionSource: String
+  let provider: String
+  let model: String
   let inputTokens: Int64
   let outputTokens: Int64
   let cacheTokens: Int64

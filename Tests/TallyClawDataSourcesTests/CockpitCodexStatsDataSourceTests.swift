@@ -25,6 +25,7 @@ struct CockpitCodexStatsDataSourceTests {
     #expect(snapshot.week.tokens.total == 2_580)
     #expect(snapshot.month.requests.total == 40)
     #expect(snapshot.lifetime.requests.total == 100)
+    #expect(snapshot.lifetimeStartedAt == Date(timeIntervalSince1970: 1_700_000_000))
     #expect(snapshot.topSources == [SourceShare(name: "cockpit", percent: 100)])
     #expect(snapshot.syncHealth == .idle)
   }
@@ -69,6 +70,48 @@ struct CockpitCodexStatsDataSourceTests {
 
     #expect(snapshot.week.tokens.total == 2_580)
     #expect(snapshot.month.tokens.total == 5_020)
+  }
+
+  @Test("reads snapshot-level observation without exposing account identity")
+  func readsSnapshotLevelObservationWithoutExposingAccountIdentity() async throws {
+    let updatedAt: Int64 = 1_700_000_100_000
+    let statsURL = try makeFixtureStatsFile(updatedAt: updatedAt)
+    let dataSource = CockpitCodexStatsDataSource(statsURL: statsURL)
+
+    let observations = try await dataSource.readObservations(since: nil)
+
+    #expect(observations.count == 1)
+    #expect(observations.first?.sourceID == "cockpit-codex-stats")
+    #expect(observations.first?.sourceEventID == "cockpit-codex-stats:1700000100000:totals")
+    #expect(observations.first?.sourceName == "cockpit")
+    #expect(observations.first?.provider == "cockpit")
+    #expect(observations.first?.model == "codex")
+    #expect(observations.first?.confidence == "snapshot")
+    #expect(observations.first?.tokens.input == 9000)
+    #expect(observations.first?.tokens.output == 1500)
+    #expect(observations.first?.tokens.cache == 1200)
+    #expect(observations.first?.tokens.thinking == 200)
+    #expect(observations.first?.requests.total == 100)
+    #expect(observations.allSatisfy { !$0.sourceEventID.contains("@") })
+
+    let newerObservations = try await dataSource.readObservations(
+      since: Date(timeIntervalSince1970: Double(updatedAt + 1) / 1_000)
+    )
+    #expect(newerObservations.isEmpty)
+  }
+
+  @Test("reports missing required JSON fields explicitly")
+  func reportsMissingRequiredJSONFieldsExplicitly() async throws {
+    let statsURL = try makeBrokenStatsFile()
+    let dataSource = CockpitCodexStatsDataSource(statsURL: statsURL)
+
+    do {
+      _ = try await dataSource.readSnapshot()
+      Issue.record("Expected schema mismatch error.")
+    } catch CockpitCodexStatsDataSourceError.schemaMismatch(let message) {
+      #expect(message.contains("Cockpit schema mismatch"))
+      #expect(message.contains("totals"))
+    }
   }
 }
 
@@ -160,6 +203,23 @@ private func makeFixtureStatsFile(
         }
       }
     ]
+  }
+  """
+
+  try json.write(to: statsURL, atomically: true, encoding: .utf8)
+  return statsURL
+}
+
+private func makeBrokenStatsFile() throws -> URL {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let statsURL = directory.appendingPathComponent("codex_local_access_stats.json")
+
+  let json = """
+  {
+    "since": 1700000000000,
+    "updatedAt": 1700000100000
   }
   """
 

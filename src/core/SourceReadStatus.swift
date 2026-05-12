@@ -14,6 +14,7 @@ public struct SourceReadStatus: Identifiable, Equatable, Sendable {
   public var lastReadAt: Date
   public var lastObservedAt: Date?
   public var errorSummary: String?
+  public var readDurationMilliseconds: Int?
 
   public init(
     sourceID: String,
@@ -21,7 +22,8 @@ public struct SourceReadStatus: Identifiable, Equatable, Sendable {
     state: SourceReadState,
     lastReadAt: Date,
     lastObservedAt: Date? = nil,
-    errorSummary: String? = nil
+    errorSummary: String? = nil,
+    readDurationMilliseconds: Int? = nil
   ) {
     self.sourceID = sourceID
     self.displayName = displayName
@@ -29,6 +31,7 @@ public struct SourceReadStatus: Identifiable, Equatable, Sendable {
     self.lastReadAt = lastReadAt
     self.lastObservedAt = lastObservedAt
     self.errorSummary = errorSummary
+    self.readDurationMilliseconds = readDurationMilliseconds
   }
 }
 

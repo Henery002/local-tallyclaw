@@ -1,7 +1,7 @@
 import Foundation
 import TallyClawCore
 
-public struct OpenClawUsageDataSource: UsageDataSource {
+public struct OpenClawUsageDataSource: UsageObservationDataSource {
   public let id = "openclaw-usage"
   public let displayName = "openclaw"
   public let accessPolicy = SourceAccessPolicy.default
@@ -25,34 +25,7 @@ public struct OpenClawUsageDataSource: UsageDataSource {
       return nil
     }
 
-    let gatewayBackedProviders = try readGatewayBackedProviders()
-
-    // Collect events from both legacy .usage-ledger.json files and the
-    // newer trajectory .jsonl files. Use a shared deduplication set so
-    // the same model completion is never counted twice.
-    var dedupeKeys = Set<String>()
-    var events: [OpenClawUsageEvent] = []
-
-    // 1. Legacy usage-ledger (may have stopped writing, but still holds
-    //    historical data that predates trajectory files).
-    let ledgerURLs = try findUsageLedgerURLs()
-    for url in ledgerURLs {
-      let ledgerEvents = try readLedgerEvents(from: url, excludingProviders: gatewayBackedProviders)
-      for event in ledgerEvents {
-        if dedupeKeys.insert(event.dedupeKey).inserted {
-          events.append(event)
-        }
-      }
-    }
-
-    // 2. Trajectory files – the actively written session records that
-    //    contain model.completed events with full usage data.
-    let trajectoryEvents = try readTrajectoryEvents(excludingProviders: gatewayBackedProviders)
-    for event in trajectoryEvents {
-      if dedupeKeys.insert(event.dedupeKey).inserted {
-        events.append(event)
-      }
-    }
+    let events = try collectUsageEvents()
 
     guard !events.isEmpty else {
       return nil
@@ -68,8 +41,72 @@ public struct OpenClawUsageDataSource: UsageDataSource {
       lifetime: support.periodStats(for: events, since: nil),
       topSources: support.topSources(for: events, since: support.todayStart),
       syncHealth: .idle,
-      observedAt: observedAt
+      observedAt: observedAt,
+      lifetimeStartedAt: Self.earliestValidEventDate(events),
+      lifetimeStartedAtLabel: "openclaw"
     )
+  }
+
+  public func readObservations(since startDate: Date?) async throws -> [UsageObservation] {
+    guard FileManager.default.fileExists(atPath: rootURL.path) else {
+      return []
+    }
+
+    return try collectUsageEvents()
+      .filter { event in
+        event.totalTokens > 0 && (startDate.map { event.observedAt >= $0 } ?? true)
+      }
+      .sorted {
+        if $0.observedAt == $1.observedAt {
+          return $0.sourceEventID > $1.sourceEventID
+        }
+        return $0.observedAt > $1.observedAt
+      }
+      .map { event in
+        UsageObservation(
+          sourceID: id,
+          sourceEventID: event.sourceEventID,
+          sourceName: event.observationSourceName,
+          provider: event.provider,
+          model: event.model,
+          observedAt: event.observedAt,
+          tokens: TokenBreakdown(
+            input: event.inputTokens,
+            output: event.outputTokens,
+            cache: event.cacheTokens,
+            thinking: event.reasoningTokens
+          ),
+          requests: RequestStats(total: 1, succeeded: 1, failed: 0)
+        )
+      }
+  }
+
+  private func collectUsageEvents() throws -> [OpenClawUsageEvent] {
+    let gatewayBackedProviders = try readGatewayBackedProviders()
+    var dedupeKeys = Set<String>()
+    var events: [OpenClawUsageEvent] = []
+
+    let ledgerURLs = try findUsageLedgerURLs()
+    for url in ledgerURLs {
+      let ledgerEvents = try readLedgerEvents(from: url, excludingProviders: gatewayBackedProviders)
+      for event in ledgerEvents where dedupeKeys.insert(event.dedupeKey).inserted {
+        events.append(event)
+      }
+    }
+
+    let trajectoryEvents = try readTrajectoryEvents(excludingProviders: gatewayBackedProviders)
+    for event in trajectoryEvents where dedupeKeys.insert(event.dedupeKey).inserted {
+      events.append(event)
+    }
+
+    return events
+  }
+
+  private static func earliestValidEventDate(_ events: [OpenClawUsageEvent]) -> Date {
+    events
+      .map(\.observedAt)
+      .filter { $0 > UsageSnapshot.unknownLifetimeStartDate }
+      .min() ?? UsageSnapshot.unknownLifetimeStartDate
   }
 
   // MARK: - Legacy usage-ledger.json
@@ -97,12 +134,19 @@ public struct OpenClawUsageDataSource: UsageDataSource {
     let data = try Data(contentsOf: ledgerURL, options: [.mappedIfSafe])
     let ledger = try JSONDecoder().decode(OpenClawUsageLedger.self, from: data)
     return ledger.events.compactMap { key, event in
-      guard !excludingProviders.contains(event.provider) else { return nil }
+      guard let provider = event.provider, !excludingProviders.contains(provider) else { return nil }
       guard event.usage.total > 0 else { return nil }
+      let agentName = agentName(forLedgerURL: ledgerURL)
+      let model = event.model ?? provider
+      let dedupeKey = "ledger:\(key)"
       return OpenClawUsageEvent(
-        dedupeKey: "ledger:\(key)",
+        sourceEventID: dedupeKey,
+        dedupeKey: dedupeKey,
         observedAt: Date(timeIntervalSince1970: Double(event.ts) / 1_000),
-        sourceName: event.provider,
+        sourceName: model,
+        observationSourceName: agentName,
+        provider: provider,
+        model: model,
         requestCount: 1,
         inputTokens: event.usage.input,
         outputTokens: event.usage.output,
@@ -110,6 +154,16 @@ public struct OpenClawUsageDataSource: UsageDataSource {
         reasoningTokens: 0
       )
     }
+  }
+
+  private func agentName(forLedgerURL ledgerURL: URL) -> String {
+    let components = ledgerURL.pathComponents
+    guard let sessionsIndex = components.lastIndex(of: "sessions"),
+          sessionsIndex >= 1
+    else {
+      return "openclaw"
+    }
+    return components[sessionsIndex - 1]
   }
 
   // MARK: - Trajectory .jsonl files
@@ -137,6 +191,7 @@ public struct OpenClawUsageDataSource: UsageDataSource {
         for trajectoryURL in trajectoryFiles {
           let fileEvents = try readTrajectoryFile(
             at: trajectoryURL,
+            agentName: agentDir.lastPathComponent,
             excludingProviders: excludingProviders
           )
           events.append(contentsOf: fileEvents)
@@ -173,6 +228,7 @@ public struct OpenClawUsageDataSource: UsageDataSource {
 
   private func readTrajectoryFile(
     at url: URL,
+    agentName: String,
     excludingProviders: Set<String>
   ) throws -> [OpenClawUsageEvent] {
     let data = try Data(contentsOf: url, options: [.mappedIfSafe])
@@ -241,9 +297,13 @@ public struct OpenClawUsageDataSource: UsageDataSource {
       let modelId = obj["modelId"] as? String ?? provider
 
       events.append(OpenClawUsageEvent(
+        sourceEventID: dedupeKey,
         dedupeKey: dedupeKey,
         observedAt: observedAt,
         sourceName: modelId,
+        observationSourceName: agentName,
+        provider: provider,
+        model: modelId,
         requestCount: requestCount,
         inputTokens: input,
         outputTokens: output,
@@ -314,7 +374,8 @@ private struct OpenClawUsageLedger: Decodable {
 private struct OpenClawLedgerEvent: Decodable {
   let ts: Int64
   let usage: OpenClawUsageCounters
-  let provider: String
+  let provider: String?
+  let model: String?
 }
 
 private struct OpenClawUsageCounters: Decodable {
@@ -328,9 +389,13 @@ private struct OpenClawUsageCounters: Decodable {
 // MARK: - Unified event model
 
 private struct OpenClawUsageEvent: UsageEventLike {
+  let sourceEventID: String
   let dedupeKey: String
   let observedAt: Date
   let sourceName: String
+  let observationSourceName: String
+  let provider: String
+  let model: String
   let requestCount: Int
   let inputTokens: Int64
   let outputTokens: Int64

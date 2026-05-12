@@ -4,7 +4,6 @@ import SwiftUI
 struct FloatingWindowConfigurator: NSViewRepresentable {
   @ObservedObject var windowState: FloatingWindowState
   @ObservedObject var preferences: FloatingWindowPreferences
-  let desiredSize: CGSize
   private static var positionedWindows = Set<ObjectIdentifier>()
 
   func makeNSView(context: Context) -> NSView {
@@ -54,8 +53,6 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
     if isFirstConfiguration {
       position(window)
       Self.positionedWindows.insert(identifier)
-    } else {
-      resize(window)
     }
 
     if isFirstConfiguration || preferences.isAlwaysOnTop {
@@ -65,7 +62,7 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
   }
 
   private func position(_ window: NSWindow) {
-    let size = NSSize(width: desiredSize.width, height: desiredSize.height)
+    let size = NSSize(width: 308, height: 420)
     if let restoredFrame = preferences.restoredFrame(defaultSize: size) {
       window.setFrame(restoredFrame, display: true)
       return
@@ -77,21 +74,5 @@ struct FloatingWindowConfigurator: NSViewRepresentable {
       y: screenFrame.maxY - size.height - 72
     )
     window.setFrame(NSRect(origin: origin, size: size), display: true)
-  }
-
-  private func resize(_ window: NSWindow) {
-    let size = NSSize(width: desiredSize.width, height: desiredSize.height)
-    guard abs(window.frame.width - size.width) > 0.5 || abs(window.frame.height - size.height) > 0.5 else {
-      return
-    }
-
-    let top = window.frame.maxY
-    let resizedFrame = NSRect(
-      x: window.frame.minX,
-      y: top - size.height,
-      width: size.width,
-      height: size.height
-    )
-    window.setFrame(resizedFrame, display: true, animate: false)
   }
 }

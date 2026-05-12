@@ -1,3 +1,4 @@
+import Foundation
 import TallyClawCore
 
 public protocol UsageDataSource: Sendable {
@@ -6,6 +7,10 @@ public protocol UsageDataSource: Sendable {
   var accessPolicy: SourceAccessPolicy { get }
 
   func readSnapshot() async throws -> UsageSnapshot?
+}
+
+public protocol UsageObservationDataSource: UsageDataSource {
+  func readObservations(since startDate: Date?) async throws -> [UsageObservation]
 }
 
 public struct PreviewUsageDataSource: UsageDataSource {
@@ -19,4 +24,3 @@ public struct PreviewUsageDataSource: UsageDataSource {
     UsageSnapshot.preview
   }
 }
-

@@ -1,7 +1,7 @@
 import Foundation
 import TallyClawCore
 
-public struct CockpitCodexStatsDataSource: UsageDataSource {
+public struct CockpitCodexStatsDataSource: UsageObservationDataSource {
   public let id = "cockpit-codex-stats"
   public let displayName = "cockpit tools"
   public let accessPolicy = SourceAccessPolicy.default
@@ -26,8 +26,7 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
       return nil
     }
 
-    let data = try Data(contentsOf: statsURL, options: [.mappedIfSafe])
-    let file = try JSONDecoder().decode(CockpitStatsFile.self, from: data)
+    let file = try readStatsFile()
     let observedAt = Date(timeIntervalSince1970: Double(file.updatedAt ?? file.since ?? 0) / 1_000)
     let currentTime = now()
 
@@ -68,8 +67,47 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
       lifetime: file.totals.periodStats,
       topSources: todayStats.requests.total > 0 ? [SourceShare(name: "cockpit", percent: 100)] : [],
       syncHealth: .idle,
-      observedAt: observedAt
+      observedAt: observedAt,
+      lifetimeStartedAt: file.since.map(Self.dateFromMilliseconds) ?? UsageSnapshot.unknownLifetimeStartDate,
+      lifetimeStartedAtLabel: "cockpit"
     )
+  }
+
+  public func readObservations(since startDate: Date?) async throws -> [UsageObservation] {
+    guard FileManager.default.fileExists(atPath: statsURL.path) else {
+      return []
+    }
+
+    let file = try readStatsFile()
+    let observedAt = Date(timeIntervalSince1970: Double(file.updatedAt ?? file.since ?? 0) / 1_000)
+    if let startDate, observedAt < startDate {
+      return []
+    }
+
+    return [
+      UsageObservation(
+        sourceID: id,
+        sourceEventID: "\(id):\(file.updatedAt ?? file.since ?? 0):totals",
+        sourceName: "cockpit",
+        provider: "cockpit",
+        model: "codex",
+        observedAt: observedAt,
+        tokens: file.totals.periodStats.tokens,
+        requests: file.totals.periodStats.requests,
+        confidence: "snapshot"
+      )
+    ]
+  }
+
+  private func readStatsFile() throws -> CockpitStatsFile {
+    let data = try Data(contentsOf: statsURL, options: [.mappedIfSafe])
+    do {
+      return try JSONDecoder().decode(CockpitStatsFile.self, from: data)
+    } catch let error as DecodingError {
+      throw CockpitCodexStatsDataSourceError.schemaMismatch(
+        message: "Cockpit schema mismatch: \(Self.decodingSummary(error))"
+      )
+    }
   }
 
   /// Return the window's stats only if the window's `since` timestamp falls
@@ -100,6 +138,23 @@ public struct CockpitCodexStatsDataSource: UsageDataSource {
   private static func dateFromMilliseconds(_ milliseconds: Int64) -> Date {
     Date(timeIntervalSince1970: Double(milliseconds) / 1_000)
   }
+
+  private static func decodingSummary(_ error: DecodingError) -> String {
+    switch error {
+    case .keyNotFound(let key, let context):
+      let path = (context.codingPath.map(\.stringValue) + [key.stringValue]).joined(separator: ".")
+      return "missing required field \(path)"
+    case .typeMismatch(_, let context), .valueNotFound(_, let context), .dataCorrupted(let context):
+      let path = context.codingPath.map(\.stringValue).joined(separator: ".")
+      return path.isEmpty ? context.debugDescription : "\(path): \(context.debugDescription)"
+    @unknown default:
+      return String(describing: error)
+    }
+  }
+}
+
+public enum CockpitCodexStatsDataSourceError: Error, Equatable {
+  case schemaMismatch(message: String)
 }
 
 private struct CockpitStatsFile: Decodable {

@@ -16,6 +16,7 @@ struct TallyClawHostView: View {
     observedAt: Date(timeIntervalSince1970: 0)
   )
   @State private var ledgerInitializationFailed = false
+  @State private var refreshCadence = UsageRefreshCadence()
 
   private let sources: [any UsageDataSource] = [
     CockpitCodexStatsDataSource(),
@@ -39,58 +40,65 @@ struct TallyClawHostView: View {
     TallyClawRootView(snapshot: snapshot, preferences: floatingPreferences)
       .task {
         while !Task.isCancelled {
-          await refreshSnapshot()
-          try? await Task.sleep(for: .seconds(5))
+          let nextDelay = await refreshSnapshot()
+          try? await Task.sleep(for: .seconds(Int(nextDelay)))
         }
       }
   }
 
-  private func refreshSnapshot() async {
+  private func refreshSnapshot() async -> TimeInterval {
     var snapshots: [UsageSnapshot] = []
     var sourceStatuses: [SourceReadStatus] = []
     var readFailed = ledgerInitializationFailed
 
-    for source in sources {
-      let lastReadAt = Date()
-      do {
-        if let sourceSnapshot = try await source.readSnapshot() {
+    for result in await readSourceSnapshots() {
+      let source = sources[result.index]
+      switch result.outcome {
+      case let .available(sourceSnapshot):
           snapshots.append(sourceSnapshot)
           sourceStatuses.append(
             SourceReadStatus(
               sourceID: source.id,
               displayName: source.displayName,
               state: .available,
-              lastReadAt: lastReadAt,
-              lastObservedAt: sourceSnapshot.observedAt
+              lastReadAt: result.lastReadAt,
+              lastObservedAt: sourceSnapshot.observedAt,
+              readDurationMilliseconds: result.readDurationMilliseconds
             )
           )
           do {
             try await ledger?.record(sourceSnapshot, sourceID: source.id)
+            if let observationSource = source as? any UsageObservationDataSource,
+               let ledger {
+              let since = try await ledger.latestObservationDate(sourceID: source.id, confidence: "exact")
+              let observations = try await observationSource.readObservations(since: since)
+              try await ledger.recordObservations(observations)
+            }
           } catch {
             readFailed = true
           }
-        } else {
+      case .missing:
           sourceStatuses.append(
             SourceReadStatus(
               sourceID: source.id,
               displayName: source.displayName,
               state: .missing,
-              lastReadAt: lastReadAt
+              lastReadAt: result.lastReadAt,
+              readDurationMilliseconds: result.readDurationMilliseconds
             )
           )
-        }
-      } catch {
+      case let .failed(errorSummary):
         sourceStatuses.append(
           SourceReadStatus(
             sourceID: source.id,
             displayName: source.displayName,
             state: .failed,
-            lastReadAt: lastReadAt,
-            errorSummary: Self.errorSummary(error)
+            lastReadAt: result.lastReadAt,
+            errorSummary: errorSummary,
+            readDurationMilliseconds: result.readDurationMilliseconds
           )
         )
         readFailed = true
-        continue
       }
     }
 
@@ -107,12 +115,64 @@ struct TallyClawHostView: View {
       snapshot.sourceStatuses = sourceStatuses
       snapshot.syncHealth = readFailed ? .warning : sourceStatuses.syncHealth
     }
+
+    return refreshCadence.record(snapshot: snapshot, readFailed: readFailed)
   }
 
-  private static func errorSummary(_ error: any Error) -> String {
+  private func readSourceSnapshots() async -> [SourceReadResult] {
+    await withTaskGroup(of: SourceReadResult.self) { group in
+      for (index, source) in sources.enumerated() {
+        group.addTask {
+          let lastReadAt = Date()
+          let sourceReadStartedAt = Date()
+          do {
+            let snapshot = try await source.readSnapshot()
+            return SourceReadResult(
+              index: index,
+              lastReadAt: lastReadAt,
+              readDurationMilliseconds: Self.durationMilliseconds(since: sourceReadStartedAt),
+              outcome: snapshot.map(SourceReadOutcome.available) ?? .missing
+            )
+          } catch {
+            return SourceReadResult(
+              index: index,
+              lastReadAt: lastReadAt,
+              readDurationMilliseconds: Self.durationMilliseconds(since: sourceReadStartedAt),
+              outcome: .failed(Self.errorSummary(error))
+            )
+          }
+        }
+      }
+
+      var results: [SourceReadResult] = []
+      for await result in group {
+        results.append(result)
+      }
+      return results.sorted { $0.index < $1.index }
+    }
+  }
+
+  nonisolated private static func errorSummary(_ error: any Error) -> String {
     String(describing: error)
       .replacingOccurrences(of: "\n", with: " ")
       .prefix(160)
       .description
   }
+
+  nonisolated private static func durationMilliseconds(since start: Date) -> Int {
+    max(0, Int(Date().timeIntervalSince(start) * 1_000))
+  }
+}
+
+private struct SourceReadResult: Sendable {
+  let index: Int
+  let lastReadAt: Date
+  let readDurationMilliseconds: Int
+  let outcome: SourceReadOutcome
+}
+
+private enum SourceReadOutcome: Sendable {
+  case available(UsageSnapshot)
+  case missing
+  case failed(String)
 }

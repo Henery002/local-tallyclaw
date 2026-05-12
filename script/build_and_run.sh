@@ -16,7 +16,23 @@ INFO_PLIST="$APP_CONTENTS/Info.plist"
 
 cd "$ROOT_DIR"
 
-pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+stop_running_app() {
+  pkill -x "$APP_NAME" >/dev/null 2>&1 || true
+
+  for _ in {1..10}; do
+    if ! pgrep -x "$APP_NAME" >/dev/null 2>&1; then
+      return
+    fi
+    sleep 0.1
+  done
+
+  # TallyClaw intentionally intercepts normal app termination so closing the
+  # main window keeps the menu bar companion alive. The dev run script needs a
+  # fresh process, so force-kill only the local TallyClaw debug app if needed.
+  pkill -9 -x "$APP_NAME" >/dev/null 2>&1 || true
+}
+
+stop_running_app
 
 swift build
 BUILD_BINARY="$(swift build --show-bin-path)/$APP_NAME"

@@ -23,7 +23,45 @@ struct HermesUsageDataSourceTests {
     #expect(snapshot.lifetime.tokens.total == 402)
     #expect(snapshot.today.requests.total == 3)
     #expect(snapshot.topSources.first?.name == "openai")
+    #expect(snapshot.lifetimeStartedAt == Date(timeIntervalSince1970: 1_680_000_000))
     #expect(snapshot.syncHealth == .idle)
+  }
+
+  @Test("reads event-level observations from non-gateway sessions")
+  func readsEventLevelObservationsFromNonGatewaySessions() async throws {
+    let rootURL = try makeHermesFixture()
+    let dataSource = HermesUsageDataSource(rootURL: rootURL)
+
+    let observations = try await dataSource.readObservations(since: nil)
+
+    #expect(observations.count == 3)
+    #expect(observations.first?.sourceID == "hermes-usage")
+    #expect(observations.first?.sourceEventID == "s1")
+    #expect(observations.first?.sourceName == "cli")
+    #expect(observations.first?.provider == "openai")
+    #expect(observations.first?.model == "gpt-5.4")
+    #expect(observations.first?.tokens.input == 120)
+    #expect(observations.first?.tokens.output == 40)
+    #expect(observations.first?.tokens.cache == 10)
+    #expect(observations.first?.tokens.thinking == 7)
+    #expect(observations.first?.requests.total == 3)
+    #expect(observations.allSatisfy { !$0.sourceEventID.contains("@") })
+    #expect(observations.allSatisfy { $0.model != "codex-default" })
+  }
+
+  @Test("reports missing required schema columns explicitly")
+  func reportsMissingRequiredSchemaColumnsExplicitly() async throws {
+    let rootURL = try makeHermesBrokenSchemaFixture()
+    let dataSource = HermesUsageDataSource(rootURL: rootURL)
+
+    do {
+      _ = try await dataSource.readSnapshot()
+      Issue.record("Expected schema mismatch error.")
+    } catch HermesUsageDataSourceError.queryFailed(let message) {
+      #expect(message.contains("missing required columns"))
+      #expect(message.contains("input_tokens"))
+      #expect(message.contains("output_tokens"))
+    }
   }
 }
 
@@ -110,4 +148,27 @@ private func runHermesSQLite(databaseURL: URL, sql: String) throws {
   if process.terminationStatus != 0 {
     throw CocoaError(.fileWriteUnknown)
   }
+}
+
+private func makeHermesBrokenSchemaFixture() throws -> URL {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+  let databaseURL = directory.appendingPathComponent("state.db")
+
+  let sql = """
+  CREATE TABLE sessions (
+    id TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    model TEXT,
+    started_at REAL NOT NULL,
+    ended_at REAL,
+    billing_provider TEXT,
+    billing_base_url TEXT,
+    api_call_count INTEGER DEFAULT 0
+  );
+  """
+
+  try runHermesSQLite(databaseURL: databaseURL, sql: sql)
+  return directory
 }

@@ -31,7 +31,43 @@ struct OpenClawUsageDataSourceTests {
     // Trajectory requests = 1
     #expect(snapshot.today.requests.total == 3)
     
+    #expect(snapshot.lifetimeStartedAt == Date(timeIntervalSince1970: 1_699_222_400))
     #expect(snapshot.syncHealth == .idle)
+  }
+
+  @Test("reads event-level observations from ledger and trajectory records")
+  func readsEventLevelObservationsFromLedgerAndTrajectoryRecords() async throws {
+    let rootURL = try makeOpenClawFixture()
+    let dataSource = OpenClawUsageDataSource(rootURL: rootURL)
+
+    let observations = try await dataSource.readObservations(since: nil)
+
+    #expect(observations.count == 5)
+    #expect(observations.first?.sourceID == "openclaw-usage")
+    #expect(observations.first?.sourceEventID == "traj:test-trace:test-run:5:model")
+    #expect(observations.first?.sourceName == "main")
+    #expect(observations.first?.provider == "mimo")
+    #expect(observations.first?.model == "mimo-pro")
+    #expect(observations.first?.tokens.input == 5000)
+    #expect(observations.first?.tokens.output == 200)
+    #expect(observations.first?.tokens.cache == 1000)
+    #expect(observations.first?.requests.total == 1)
+    #expect(observations.allSatisfy { !$0.sourceEventID.contains("@") })
+    #expect(observations.allSatisfy { $0.provider != "codex-default" })
+  }
+
+  @Test("skips malformed legacy ledger events while keeping valid records")
+  func skipsMalformedLegacyLedgerEventsWhileKeepingValidRecords() async throws {
+    let rootURL = try makeOpenClawFixtureWithMalformedLedgerEvent()
+    let dataSource = OpenClawUsageDataSource(rootURL: rootURL)
+
+    let snapshot = try #require(await dataSource.readSnapshot())
+    let observations = try await dataSource.readObservations(since: nil)
+
+    #expect(snapshot.lifetime.tokens.total == 25)
+    #expect(snapshot.lifetime.requests.total == 1)
+    #expect(observations.count == 1)
+    #expect(observations.first?.sourceEventID == "ledger:good-event")
   }
 }
 
@@ -131,5 +167,37 @@ private func makeOpenClawFixture() throws -> URL {
   try ledger.write(to: ledgerURL, atomically: true, encoding: .utf8)
   try trajectory.write(to: trajectoryURL, atomically: true, encoding: .utf8)
   try excludedTrajectory.write(to: excludedTrajectoryURL, atomically: true, encoding: .utf8)
+  return directory
+}
+
+private func makeOpenClawFixtureWithMalformedLedgerEvent() throws -> URL {
+  let directory = FileManager.default.temporaryDirectory
+    .appendingPathComponent(UUID().uuidString, isDirectory: true)
+  try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+  let sessionsDir = directory.appendingPathComponent("agents/main/sessions", isDirectory: true)
+  try FileManager.default.createDirectory(at: sessionsDir, withIntermediateDirectories: true)
+  let ledgerURL = sessionsDir.appendingPathComponent(".usage-ledger.json")
+
+  let ledger = """
+  {
+    "version": 1,
+    "updatedAt": 1700000000000,
+    "events": {
+      "bad-event": {
+        "ts": 1699999900000,
+        "usage": { "input": 900, "output": 100, "cacheRead": 0, "cacheWrite": 0, "total": 1000 }
+      },
+      "good-event": {
+        "ts": 1699999800000,
+        "usage": { "input": 20, "output": 5, "cacheRead": 0, "cacheWrite": 0, "total": 25 },
+        "provider": "scnet",
+        "model": "Qwen3-235B-A22B"
+      }
+    }
+  }
+  """
+
+  try ledger.write(to: ledgerURL, atomically: true, encoding: .utf8)
   return directory
 }
