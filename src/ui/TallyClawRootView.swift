@@ -306,14 +306,17 @@ struct PetAnimationCadence: Equatable, Sendable {
     }
 
     if isHovered {
-      return PetAnimationCadence(minimumInterval: 1.0 / 12.0)
+      return PetAnimationCadence(minimumInterval: 1.0 / 18.0)
     }
 
-    if state == .highActivity {
-      return PetAnimationCadence(minimumInterval: 1.0 / 2.0)
+    switch state {
+    case .highActivity:
+      return PetAnimationCadence(minimumInterval: 1.0 / 15.0)
+    case .warning:
+      return PetAnimationCadence(minimumInterval: 1.0 / 18.0)
+    case .idle:
+      return PetAnimationCadence(minimumInterval: isExpanded ? 1.0 / 14.0 : 1.0 / 18.0)
     }
-
-    return PetAnimationCadence(minimumInterval: 0)
   }
 }
 
@@ -413,22 +416,20 @@ private struct PetMotion {
     }
 
     // Ear Twitch Logic (rapid, smooth flicking)
-    // Left Ear: 3 rapid outward flicks every 4.7s
+    // Left Ear: quick outward flutter every 4.7s.
     let leftPhase = time.truncatingRemainder(dividingBy: 4.7)
-    if leftPhase < 0.15 {
-      let progress = leftPhase / 0.15
-      // abs(sin) guarantees outward only; 3*pi means 3 flicks
-      earRotationLeft = CGFloat(-abs(sin(progress * .pi * 3)) * 22)
+    if leftPhase < 0.26 {
+      let progress = leftPhase / 0.26
+      earRotationLeft = CGFloat(-abs(sin(progress * .pi * 3.6)) * 24)
     } else {
       earRotationLeft = 0
     }
 
-    // Right Ear: 2 slightly slower outward flicks every 5.3s
+    // Right Ear: slightly slower companion flutter every 5.3s.
     let rightPhase = time.truncatingRemainder(dividingBy: 5.3)
-    if rightPhase < 0.2 {
-      let progress = rightPhase / 0.2
-      // right ear outward is positive rotation
-      earRotationRight = CGFloat(abs(sin(progress * .pi * 2)) * 22)
+    if rightPhase < 0.3 {
+      let progress = rightPhase / 0.3
+      earRotationRight = CGFloat(abs(sin(progress * .pi * 2.6)) * 23)
     } else {
       earRotationRight = 0
     }
@@ -453,8 +454,8 @@ private struct TallyClawPetBody: View {
 
   var body: some View {
     ZStack {
-      shell
       ears
+      shell
       face
       if state == .highActivity && activitySource == .cockpit {
         CodexFocusSweep(phase: motion.energyPhase, color: palette.main)
@@ -490,17 +491,46 @@ private struct TallyClawPetBody: View {
 
   private var ears: some View {
     ZStack {
-      PetEar()
-        .fill(palette.stroke)
-        .frame(width: 9, height: 9)
-        .rotationEffect(.degrees(-10 + motion.earRotationLeft), anchor: .bottomTrailing)
-        .offset(x: -12, y: -16)
-      PetEar()
-        .fill(palette.stroke)
-        .frame(width: 9, height: 9)
-        .rotationEffect(.degrees(10 + motion.earRotationRight), anchor: .bottomLeading)
-        .offset(x: 12, y: -16)
+      ear(rotation: -10 + motion.earRotationLeft, anchor: .bottomTrailing, xOffset: -12.5)
+      ear(rotation: 10 + motion.earRotationRight, anchor: .bottomLeading, xOffset: 12.5)
     }
+  }
+
+  private func ear(rotation: CGFloat, anchor: UnitPoint, xOffset: CGFloat) -> some View {
+    PetEar()
+      .fill(
+        LinearGradient(
+          colors: [
+            palette.stroke.opacity(0.72),
+            palette.bodyTop.opacity(1.0)
+          ],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+      )
+      .overlay {
+        PetEar()
+          .stroke(palette.stroke.opacity(0.24), lineWidth: 0.45)
+      }
+      .overlay {
+        PetEar()
+          .fill(
+            LinearGradient(
+              colors: [
+                .clear,
+                palette.bodyTop.opacity(0.22)
+              ],
+              startPoint: .top,
+              endPoint: .bottom
+            )
+          )
+          .padding(.horizontal, 1.25)
+          .padding(.top, 1.35)
+      }
+      .frame(width: 11.5, height: 11.5)
+      .shadow(color: palette.glow.opacity(0.08), radius: 0.9)
+      .rotationEffect(.degrees(rotation), anchor: anchor)
+      .offset(x: xOffset, y: -13.8)
   }
 
   private var face: some View {

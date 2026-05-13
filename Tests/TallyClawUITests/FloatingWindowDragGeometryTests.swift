@@ -5,8 +5,8 @@ import Testing
 
 @Suite("Pet animation cadence")
 struct PetAnimationCadenceTests {
-  @Test("uses low frequency cadence when idle and collapsed")
-  func usesLowFrequencyCadenceWhenIdleAndCollapsed() {
+  @Test("keeps a lightweight life cadence when idle")
+  func keepsLightweightLifeCadenceWhenIdle() {
     let cadence = PetAnimationCadence.resolve(
       state: .idle,
       isExpanded: false,
@@ -15,11 +15,11 @@ struct PetAnimationCadenceTests {
       hasParticles: false
     )
 
-    #expect(cadence.minimumInterval == 0)
+    #expect(cadence.minimumInterval == 1.0 / 18.0)
   }
 
-  @Test("uses interactive cadence only while interaction or activity is visible")
-  func usesInteractiveCadenceOnlyWhileNeeded() {
+  @Test("uses richer cadence for interaction and visible activity")
+  func usesRicherCadenceForInteractionAndActivity() {
     #expect(
       PetAnimationCadence.resolve(
         state: .idle,
@@ -27,7 +27,7 @@ struct PetAnimationCadenceTests {
         isHovered: true,
         isPressed: false,
         hasParticles: false
-      ).minimumInterval == 1.0 / 12.0
+      ).minimumInterval == 1.0 / 18.0
     )
     #expect(
       PetAnimationCadence.resolve(
@@ -36,7 +36,7 @@ struct PetAnimationCadenceTests {
         isHovered: false,
         isPressed: false,
         hasParticles: false
-      ).minimumInterval == 1.0 / 2.0
+      ).minimumInterval == 1.0 / 15.0
     )
     #expect(
       PetAnimationCadence.resolve(
@@ -45,7 +45,7 @@ struct PetAnimationCadenceTests {
         isHovered: false,
         isPressed: false,
         hasParticles: false
-      ).minimumInterval == 0
+      ).minimumInterval == 1.0 / 18.0
     )
     #expect(
       PetAnimationCadence.resolve(
@@ -54,7 +54,7 @@ struct PetAnimationCadenceTests {
         isHovered: false,
         isPressed: false,
         hasParticles: false
-      ).minimumInterval == 0
+      ).minimumInterval == 1.0 / 14.0
     )
     #expect(
       PetAnimationCadence.resolve(
